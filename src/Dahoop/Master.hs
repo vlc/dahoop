@@ -59,7 +59,9 @@ runAMaster k config preloadData messages =
                     k Finished
                     return ()
 
-announcement :: DistConfig -> M.JobCode -> M.Announcement
+announcement :: DistConfig
+                -> M.JobCode
+                -> M.Announcement
 announcement v jc =
   M.Announcement
       jc
@@ -68,7 +70,10 @@ announcement v jc =
       (tcpHere (v ^. preloadPort))
   where tcpHere = TCP (v ^. connectAddress)
 
-announce :: EventHandler -> M.Announcement -> [Address Connect] -> ZMQ s ()
+announce :: EventHandler
+            -> M.Announcement
+            -> [Address Connect]
+            -> ZMQ s ()
 announce k ann ss =
   do announceSocket <- socket Pub
      mapM_ (connectM announceSocket) ss
