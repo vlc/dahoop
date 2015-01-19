@@ -7,6 +7,7 @@ import           Control.Concurrent     (threadDelay)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.ByteString        (ByteString)
 import qualified Data.ByteString        as BS (reverse)
+import Data.Serialize (encode)
 import           Data.Monoid            ((<>))
 import           System.Environment     (getArgs)
 import           System.Exit            (exitFailure)
@@ -34,8 +35,8 @@ master =
         someSlaves = map f [5000, 5001] where f = TCP (IP4' 127 0 0 1)
         messages :: [ByteString]
         messages = ["one", "two", "three"]
-        preloadData = "abc"
-     in M.runAMaster k config preloadData messages
+        preloadData = "abc" :: ByteString
+     in M.runAMaster k config (encode preloadData) messages print
   where k :: M.EventHandler
         k = liftIO . \case
                         M.Announcing ann -> putStrLn $ "Announcing " ++ show ann

@@ -13,7 +13,7 @@ import Control.Lens             ((^.))
 import Control.Monad            (forever)
 import Control.Monad.IO.Class   (MonadIO, liftIO)
 import Data.ByteString          (ByteString)
-import Data.Serialize           (Serialize, runGet)
+import Data.Serialize           (Serialize, runGet, decode)
 import System.ZMQ4.Monadic      (EventMsg (MonitorStopped), EventType (AllEvents), Push (Push), Receiver, Req (Req),
                                  Sender, Socket, Sub (Sub), ZMQ, async, monitor, receive, runZMQ, send, socket,
                                  subscribe, waitRead)
@@ -34,7 +34,7 @@ data Events
   | StartedUnit WorkId
   | FinishedUnit WorkId
   | FinishedJob Int
-                JobCode
+                JobCode deriving (Eq, Show)
 
 -- |
 -- A NOTE ABOUT CONCURRENCY
@@ -52,15 +52,15 @@ zThreadDelay = threadDelay
 
 type EventHandler = forall s. Events -> ZMQ s ()
 
-runASlave :: (Serialize a,Serialize b)
-          => EventHandler -> (ByteString -> a -> IO b) -> Int -> IO ()
+runASlave :: (Show c, Serialize a,Serialize b, Serialize c)
+          => EventHandler -> (c -> a -> IO b) -> Int -> IO ()
 runASlave k workerThread s =
   forever $
   runZMQ $
   do (v,queue) <- announcementsQueue s
      ann <- waitForAnnouncement k queue
-     preload <- requestPreload k
-                               (ann ^. preloadAddress)
+     Right (preload :: c) <- decode <$> requestPreload k (ann ^. preloadAddress)
+     liftIO $ print preload
      worker <- async (do workIn <- returning (socket Req) (`connectM` (ann ^. askAddress))
                          workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
                          workLoop k workIn workOut (workerThread preload))
