@@ -30,7 +30,9 @@ import Dahoop.ZMQ4
 data Events
   = AwaitingAnnouncement
   | ReceivedAnnouncement Announcement
+  | RequestingPreload
   | ReceivedPreload
+  | WaitingForWorkReply
   | StartedUnit WorkId
   | FinishedUnit WorkId
   | FinishedJob Int
@@ -44,12 +46,6 @@ data Events
 -- any async tasks that are expected to run forever (in the context of a job) need to be
 -- explicitly cancelled
 
-zCancel :: Async a -> IO ()
-zCancel = cancel
-
-zThreadDelay :: Int -> IO ()
-zThreadDelay = threadDelay
-
 type EventHandler = forall s. Events -> ZMQ s ()
 
 runASlave :: (Show c, Serialize a,Serialize b, Serialize c)
@@ -60,7 +56,6 @@ runASlave k workerThread s =
   do (v,queue) <- announcementsQueue s
      ann <- waitForAnnouncement k queue
      Right (preload :: c) <- decode <$> requestPreload k (ann ^. preloadAddress)
-     liftIO $ print preload
      worker <- async (do workIn <- returning (socket Req) (`connectM` (ann ^. askAddress))
                          workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
                          workLoop k workIn workOut (workerThread preload))
@@ -69,6 +64,7 @@ runASlave k workerThread s =
        do _ <- waitAnyCancel [worker,waiter,v]
           -- If we don't threadDelay here, STM exceptions happen when we loop
           -- around and wait for a new job to do
+
           -- I think it's because 0mq cleanup happens out of band somehow.
           threadDelay 500000
      return ()
@@ -100,12 +96,12 @@ waitForDone queue ourJc =
                               | otherwise   -> loop
                 Right _ -> loop
      atomicallyIO loop
-     liftIO (putStrLn "Got Done")
 
 requestPreload :: EventHandler -> Address Connect -> ZMQ z ByteString
 requestPreload k port =
   do s <- socket Req
      connectM s port
+     k RequestingPreload
      send s [] ""
      receive s <*
        k ReceivedPreload
@@ -119,7 +115,7 @@ workLoop :: (Serialize s,Serialize a,Receiver t,Sender t1,Sender t)
 workLoop k workIn workOut f = loop (0 :: Int)
   where loop c =
           do send workIn [] ""
-             liftIO $ putStrLn "Waiting for reply" -- TODO Events
+             k WaitingForWorkReply
              input <- waitRead workIn >> receive workIn
              let Right n = runGet getWorkOrTerminate input -- HAHA, parsing never fails
              case n of

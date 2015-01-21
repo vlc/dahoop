@@ -8,7 +8,7 @@ module Dahoop.Master where
 
 import Control.Applicative      ((<*))
 import Control.Concurrent       (threadDelay)
-import Control.Concurrent.Async (cancel)
+import Control.Concurrent.Async (cancel, link)
 import Control.Lens             (makeLenses, (^.))
 import Control.Monad            (forever, unless)
 import Data.ByteString          (ByteString)
@@ -51,7 +51,8 @@ runAMaster :: EventHandler -> DistConfig -> ByteString -> [ByteString] -> (ByteS
 runAMaster k config preloadData messages f =
         runZMQ $ do jobCode <- liftIO M.generateJobCode
                     announceThread <- async (announce k (announcement config jobCode) (config ^. slaves))
-                    _ <- async (preload k (config ^. preloadPort) preloadData)
+                    liftIO . link $ announceThread
+                    (liftIO . link) =<< async (preload k (config ^. preloadPort) preloadData)
                     k (Began jobCode)
                     theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) messages (liftIO . f)
                     liftIO (cancel announceThread)
