@@ -1,17 +1,16 @@
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# OPTIONS_GHC -Wall #-}
 module Main where
 
-import           Control.Concurrent     (threadDelay)
-import           Control.Monad.IO.Class (liftIO)
-import           Data.ByteString        (ByteString)
-import qualified Data.ByteString        as BS (reverse)
-import Data.Serialize (encode)
-import           Data.Monoid            ((<>))
-import           System.Environment     (getArgs)
-import           System.Exit            (exitFailure)
-import           System.Random          (randomRIO)
+import Control.Concurrent     (threadDelay)
+import Control.Monad.IO.Class (liftIO)
+import Data.ByteString        (ByteString)
+import Data.Serialize         (encode)
+import System.Environment     (getArgs)
+import System.Exit            (exitFailure)
+import System.Random          (randomRIO)
 
 
 import qualified Dahoop.Master as M
@@ -34,9 +33,9 @@ master =
     let config = M.DistConfig 4001 4000 4002 (IP4' 127 0 0 1) someSlaves
         someSlaves = map f [5000, 5001] where f = TCP (IP4' 127 0 0 1)
         messages :: [ByteString]
-        messages = ["one", "two", "three"]
-        preloadData = "abc" :: ByteString
-     in M.runAMaster k config (encode preloadData) messages print
+        messages = map encode [(1.0 :: Float)..3.0]
+        preloadData = 1.1 :: Float
+     in M.runAMaster k config (encode preloadData) messages (print :: Float -> IO ())
   where k :: M.EventHandler
         k = liftIO . \case
                         M.Announcing ann -> putStrLn $ "Announcing " ++ show ann
@@ -51,10 +50,11 @@ master =
 -- SLAVE
 slave :: Int -> IO ()
 slave = S.runASlave k workerThread
-  where workerThread preload a =
+  where workerThread :: Float -> Float -> IO Float
+        workerThread preload a =
           do print a
              threadDelay . (1000000 *) =<< randomRIO (1,4)
-             return (BS.reverse a <> preload)
+             return (log a + preload)
         k :: S.EventHandler
         k =
           liftIO .
@@ -67,3 +67,5 @@ slave = S.runASlave k workerThread
               putStrLn ("Worked " ++ show units ++ " units of job " ++ show job)
             S.ReceivedPreload ->
               putStrLn "Preload arrived"
+            S.RequestingPreload -> putStrLn "Requesting payload"
+            S.WaitingForWorkReply -> putStrLn "Waiting for work reply"

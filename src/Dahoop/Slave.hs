@@ -122,7 +122,8 @@ workLoop k workIn workOut f = loop (0 :: Int)
                Left z -> k $ FinishedJob c z
                Right (wid, a) ->
                  do k $ StartedUnit wid
-                    result <- liftIO (f a)
+                    let Right a' = decode a
+                    result <- liftIO (f a')
                     send workOut [] . reply $ (wid, result)
                     k $ FinishedUnit wid
                     loop (succ c)

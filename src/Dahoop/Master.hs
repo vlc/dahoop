@@ -13,7 +13,7 @@ import Control.Lens             (makeLenses, (^.))
 import Control.Monad            (forever, unless)
 import Data.ByteString          (ByteString)
 import Data.List.NonEmpty       (NonEmpty ((:|)))
-import Data.Serialize           (runGet)
+import Data.Serialize           (runGet, Serialize)
 import System.ZMQ4.Monadic      (Pub (..), Pull (..), Receiver, Router (..), Sender, Socket, ZMQ, async, liftIO,
                                  receive, receiveMulti, runZMQ, send, sendMulti, socket)
 
@@ -47,11 +47,11 @@ data DistConfig = DistConfig {
                              ,_slaves         :: [Address Connect]}
 makeLenses ''DistConfig
 
-runAMaster :: EventHandler -> DistConfig -> ByteString -> [ByteString] -> (ByteString -> IO ()) -> IO ()
+runAMaster :: Serialize a => EventHandler -> DistConfig -> ByteString -> [ByteString] -> (a -> IO ()) -> IO ()
 runAMaster k config preloadData messages f =
         runZMQ $ do jobCode <- liftIO M.generateJobCode
                     announceThread <- async (announce k (announcement config jobCode) (config ^. slaves))
-                    liftIO . link $ announceThread
+                    -- liftIO . link $ announceThread
                     (liftIO . link) =<< async (preload k (config ^. preloadPort) preloadData)
                     k (Began jobCode)
                     theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) messages (liftIO . f)
@@ -102,10 +102,10 @@ broadcastFinished n ss =
 
 
 -- NOTE: Send and receive must be done using different sockets, as they are used in different threads
-theProcess' :: EventHandler -> Int -> M.JobCode -> Int -> [ByteString] -> (ByteString -> ZMQ s ()) -> ZMQ s ()
+theProcess' :: Serialize a  => EventHandler -> Int -> M.JobCode -> Int -> [ByteString] -> (a -> ZMQ s ()) -> ZMQ s ()
 theProcess' k sendPort jc rport ms yield =
   do queue <- (atomicallyIO . buildWork . annotateWork) ms
-     _ <- async (dealWork k sendPort jc queue)
+     (liftIO . link) =<< async (dealWork k sendPort jc queue)
      waitForAllResults k yield rport queue
   where annotateWork = zip (map WorkId [1 ..])
 
@@ -132,13 +132,13 @@ dealWork k port n queue =
                          (M.terminate n) <*
               k SentTerminate)
 
-waitForAllResults :: EventHandler -> (ByteString -> ZMQ z a1) -> Int -> Work a2 -> ZMQ z ()
+waitForAllResults :: Serialize a => EventHandler -> (a -> ZMQ z a1) -> Int -> Work a2 -> ZMQ z ()
 waitForAllResults k yield rp queue =
   do receiveSocket <- returning (socket Pull)
                                 (`bindM` TCP Wildcard rp)
      let loop =
            do result <- receive receiveSocket
-              let Right (wid,stuff :: ByteString) =
+              let Right (wid,stuff) =
                     runGet M.getReply result
               -- TODO What if the result is for the wrong job code?
               k (ReceivedResult wid)
