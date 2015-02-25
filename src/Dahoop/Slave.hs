@@ -51,23 +51,22 @@ type EventHandler = forall s. Events -> ZMQ s ()
 runASlave :: (Show c, Serialize a,Serialize b, Serialize c)
           => EventHandler -> (c -> a -> IO b) -> Int -> IO ()
 runASlave k workerThread s =
-  forever $
-  runZMQ $
-  do (v,queue) <- announcementsQueue s
-     ann <- waitForAnnouncement k queue
-     Right (preload :: c) <- decode <$> requestPreload k (ann ^. preloadAddress)
-     worker <- async (do workIn <- returning (socket Req) (`connectM` (ann ^. askAddress))
-                         workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
-                         workLoop k workIn workOut (workerThread preload))
-     waiter <- async (liftIO . waitForDone queue $ ann ^. annJobCode)
-     liftIO $
-       do _ <- waitAnyCancel [worker,waiter,v]
-          -- If we don't threadDelay here, STM exceptions happen when we loop
-          -- around and wait for a new job to do
+  forever $ (putStrLn "running zmq") >> runZMQ (do liftIO $ putStrLn "w t f"
+                                                   (v,queue) <- liftIO (putStrLn "creating ann queue") >> announcementsQueue s
+                                                   ann <- liftIO (putStrLn "waiting for ann") >> waitForAnnouncement k queue
+                                                   Right (preload :: c) <- decode <$> requestPreload k (ann ^. preloadAddress)
+                                                   worker <- async (do workIn <- returning (socket Req) (`connectM` (ann ^. askAddress))
+                                                                       workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
+                                                                       workLoop k workIn workOut (workerThread preload))
+                                                   waiter <- async (liftIO . waitForDone queue $ ann ^. annJobCode)
+                                                   liftIO $
+                                                           do _ <- waitAnyCancel [worker,waiter,v]
+                                                              -- If we don't threadDelay here, STM exceptions happen when we loop
+                                                              -- around and wait for a new job to do
 
-          -- I think it's because 0mq cleanup happens out of band somehow.
-          threadDelay 500000
-     return ()
+                                                              -- I think it's because 0mq cleanup happens out of band somehow.
+                                                              threadDelay 500000
+                                                   return ())
 
 waitForAnnouncement :: EventHandler -> TChan ByteString -> ZMQ z Announcement
 waitForAnnouncement k queue =
