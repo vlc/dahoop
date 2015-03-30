@@ -4,7 +4,10 @@
 {-# LANGUAGE TemplateHaskell     #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 {-# OPTIONS_GHC -Werror #-}
-module Dahoop.Master where
+module Dahoop.Master (
+  module Dahoop.Master,
+  WorkId(WorkId)
+)where
 
 import Control.Applicative      ((<*))
 import Control.Concurrent       (threadDelay)
@@ -47,14 +50,14 @@ data DistConfig = DistConfig {
                              ,_slaves         :: [Address Connect]}
 makeLenses ''DistConfig
 
-runAMaster :: Serialize a => EventHandler -> DistConfig -> ByteString -> [ByteString] -> (a -> IO ()) -> IO ()
-runAMaster k config preloadData messages f =
+runAMaster :: Serialize a => EventHandler -> DistConfig -> ByteString -> [WorkId] -> (WorkId -> IO ByteString) -> (a -> IO ()) -> IO ()
+runAMaster k config preloadData workIds workBuilder f =
         runZMQ $ do jobCode <- liftIO M.generateJobCode
                     announceThread <- async (announce k (announcement config jobCode) (config ^. slaves))
                     -- liftIO . link $ announceThread
                     (liftIO . link) =<< async (preload k (config ^. preloadPort) preloadData)
                     k (Began jobCode)
-                    theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) messages (liftIO . f)
+                    theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) workIds workBuilder (liftIO . f)
                     liftIO (cancel announceThread)
                     broadcastFinished jobCode (config ^. slaves)
                     k Finished
@@ -102,14 +105,14 @@ broadcastFinished n ss =
 
 
 -- NOTE: Send and receive must be done using different sockets, as they are used in different threads
-theProcess' :: Serialize a  => EventHandler -> Int -> M.JobCode -> Int -> [ByteString] -> (a -> ZMQ s ()) -> ZMQ s ()
-theProcess' k sendPort jc rport ms yield =
-  do queue <- (atomicallyIO . buildWork . annotateWork) ms
-     (liftIO . link) =<< async (dealWork k sendPort jc queue)
-     waitForAllResults k yield rport queue
-  where annotateWork = zip (map WorkId [1 ..])
+theProcess' :: Serialize a  => EventHandler -> Int -> M.JobCode -> Int -> [WorkId] -> (WorkId -> IO ByteString) -> (a -> ZMQ s ()) -> ZMQ s ()
+theProcess' k sendPort jc rport workIds workBuilder yield = do
+  queue <- atomicallyIO $ buildWork annotatedWork
+  (liftIO . link) =<< async (dealWork k sendPort jc queue)
+  waitForAllResults k yield rport queue
+  where annotatedWork = zip workIds (map workBuilder workIds)
 
-dealWork :: EventHandler -> Int -> M.JobCode -> Work ByteString -> ZMQ s ()
+dealWork :: EventHandler -> Int -> M.JobCode -> Work (IO ByteString) -> ZMQ s ()
 dealWork k port n queue =
   do sendSkt <- returning (socket Router)
                           (`bindM` TCP Wildcard port)
@@ -117,13 +120,14 @@ dealWork k port n queue =
            do replyWith <- replyarama sendSkt
               item <- (atomicallyIO . start) queue
               case item of
-                Just (wid,Repeats _,thing) ->
+                Just (wid,Repeats _, builder) -> do
                   -- if we've just started repeating, we could return
                   -- the item to the queue (unGetTQueue), tell the client to hold tight
                   -- for a little while, sleep for a bit, then loop.
                   -- this would give time for recently received results to
                   -- get processed, and also give time for slightly slower slaves
                   -- to get their results in
+                  thing <- liftIO builder
                   (replyWith . M.work) (wid,thing) >> loop
                 Nothing ->
                   replyWith (M.terminate n)

@@ -32,10 +32,12 @@ master :: IO ()
 master =
     let config = M.DistConfig 4001 4000 4002 (IP4' 127 0 0 1) someSlaves
         someSlaves = map f [5000, 5001] where f = TCP (IP4' 127 0 0 1)
-        messages :: [ByteString]
-        messages = map encode [(1.0 :: Float)..3.0]
+        floats = [(1.0 :: Float)..3.0]
+        workIds = map M.WorkId [1 .. (length floats)]
+        builder :: M.WorkId -> IO ByteString
+        builder (M.WorkId ix) = return $ encode $ floats !! (ix - 1)
         preloadData = 1.1 :: Float
-     in M.runAMaster k config (encode preloadData) messages (print :: Float -> IO ())
+     in M.runAMaster k config (encode preloadData) workIds builder (print :: Float -> IO ())
   where k :: M.EventHandler
         k = liftIO . \case
                         M.Announcing ann -> putStrLn $ "Announcing " ++ show ann
