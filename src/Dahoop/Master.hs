@@ -50,14 +50,14 @@ data DistConfig = DistConfig {
                              ,_slaves         :: [Address Connect]}
 makeLenses ''DistConfig
 
-runAMaster :: Serialize a => EventHandler -> DistConfig -> ByteString -> [WorkId] -> (WorkId -> IO ByteString) -> (a -> IO ()) -> IO ()
-runAMaster k config preloadData workIds workBuilder f =
+runAMaster :: Serialize a => EventHandler -> DistConfig -> ByteString -> [(WorkId, IO ByteString)] -> (a -> IO ()) -> IO ()
+runAMaster k config preloadData workbits f =
         runZMQ $ do jobCode <- liftIO M.generateJobCode
                     announceThread <- async (announce k (announcement config jobCode) (config ^. slaves))
                     -- liftIO . link $ announceThread
                     (liftIO . link) =<< async (preload k (config ^. preloadPort) preloadData)
                     k (Began jobCode)
-                    theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) workIds workBuilder (liftIO . f)
+                    theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) workbits (liftIO . f)
                     liftIO (cancel announceThread)
                     broadcastFinished jobCode (config ^. slaves)
                     k Finished
@@ -105,12 +105,11 @@ broadcastFinished n ss =
 
 
 -- NOTE: Send and receive must be done using different sockets, as they are used in different threads
-theProcess' :: Serialize a  => EventHandler -> Int -> M.JobCode -> Int -> [WorkId] -> (WorkId -> IO ByteString) -> (a -> ZMQ s ()) -> ZMQ s ()
-theProcess' k sendPort jc rport workIds workBuilder yield = do
-  queue <- atomicallyIO $ buildWork annotatedWork
+theProcess' :: Serialize a  => EventHandler -> Int -> M.JobCode -> Int -> [(WorkId, IO ByteString)] -> (a -> ZMQ s ()) -> ZMQ s ()
+theProcess' k sendPort jc rport workbits yield = do
+  queue <- atomicallyIO $ buildWork workbits
   (liftIO . link) =<< async (dealWork k sendPort jc queue)
   waitForAllResults k yield rport queue
-  where annotatedWork = zip workIds (map workBuilder workIds)
 
 dealWork :: EventHandler -> Int -> M.JobCode -> Work (IO ByteString) -> ZMQ s ()
 dealWork k port n queue =
