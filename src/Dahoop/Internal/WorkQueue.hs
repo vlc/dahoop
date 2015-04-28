@@ -31,24 +31,25 @@ newtype History = Repeats Int deriving (Eq, Show, Num, Enum)
 
 makeLenses ''Work
 
-buildWork :: Traversable t => t (WorkId, a) -> STM (Work a)
+buildWork :: [a] -> STM (Work a)
 buildWork ws = Work <$> initialQueue <*> newTVar initMap
   where initialQueue =
           do q <- newTQueue
-             _ <- traverse (\(wid, a) -> writeTQueue q (wid,Repeats 0,a)) ws
+             _ <- traverse (\(wid, a) -> writeTQueue q (wid,Repeats 0,a)) idWork
              return q
-        initMap = M.fromList . toList . fmap (\(wid, _) -> (wid, 0)) $ ws
+        initMap = M.fromList . toList . fmap (\(wid, _) -> (wid, 0)) $ idWork
+        idWork = zip (map WorkId [1..]) ws
 
 -- | Start a work item, returns Nothing if we have nothing to do
 -- >>> atomically $ buildWork [] >>= start
 -- Nothing
--- >>> atomically $ buildWork [(1, ())] >>= start
+-- >>> atomically $ buildWork [()] >>= start
 -- Just (WorkId 1,Repeats 0,())
--- >>> atomically $ buildWork [(1, ())] >>= \w -> start w >> start w
+-- >>> atomically $ buildWork [()] >>= \w -> start w >> start w
 -- Just (WorkId 1,Repeats 1,())
--- >>> atomically $ buildWork [(1, ()),(2, ())] >>= \w -> start w >> start w
+-- >>> atomically $ buildWork [(), ()] >>= \w -> start w >> start w
 -- Just (WorkId 2,Repeats 0,())
--- >>> atomically $ buildWork [(1, ()),(2, ())] >>= \w -> start w >> start w >> start w
+-- >>> atomically $ buildWork [(), ()] >>= \w -> start w >> start w >> start w
 -- Just (WorkId 1,Repeats 1,())
 start :: Work a -> STM (Maybe (WorkId, History, a))
 start w = do tryWork <- tryReadTQueue (_todo w)
@@ -65,11 +66,11 @@ start w = do tryWork <- tryReadTQueue (_todo w)
 -- | Complete a work item, returns the number of times this unit has been completed
 -- >>> atomically $ buildWork [] >>= complete 5
 -- 1
--- >>> atomically $ buildWork [(1, ())] >>= \w -> complete 1 w >> complete 1 w
+-- >>> atomically $ buildWork [()] >>= \w -> complete 1 w >> complete 1 w
 -- 2
 --
 -- Completing an item means it won't be started again
--- >>> atomically $ buildWork [(1, ()),(2, ()),(3, ())] >>= \w -> complete 1 w >> complete 2 w >> start w
+-- >>> atomically $ buildWork [(), (), ()] >>= \w -> complete 1 w >> complete 2 w >> start w
 -- Just (WorkId 3,Repeats 0,())
 complete :: WorkId -> Work a -> STM Int
 complete wid w = do doned <- readTVar $ _done w
@@ -82,9 +83,9 @@ complete wid w = do doned <- readTVar $ _done w
 -- | Check is the work is all finished
 -- >>> atomically $ buildWork [] >>= isComplete
 -- True
--- >>> atomically $ buildWork [(1, ())] >>= isComplete
+-- >>> atomically $ buildWork [()] >>= isComplete
 -- False
--- >>> atomically $ buildWork [(1, ())] >>= \w -> complete 1 w >> isComplete w
+-- >>> atomically $ buildWork [()] >>= \w -> complete 1 w >> isComplete w
 -- True
 isComplete :: Work a -> STM Bool
 isComplete w = do doned <- readTVar $ _done w

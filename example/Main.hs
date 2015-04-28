@@ -33,9 +33,9 @@ master =
     let config = M.DistConfig 4001 4000 4002 (IP4' 127 0 0 1) someSlaves
         someSlaves = map f [5000, 5001] where f = TCP (IP4' 127 0 0 1)
         floats = [(1.0 :: Float)..3.0]
-        workbits = zip (map M.WorkId [1..]) (map (return . encode) floats)
+        work = map (return . encode) floats
         preloadData = 1.1 :: Float
-     in M.runAMaster k config (encode preloadData) workbits (print :: Float -> IO ())
+     in M.runAMaster k config (encode preloadData) work (print :: Float -> IO ())
   where k :: M.EventHandler
         k = liftIO . \case
                         M.Announcing ann -> putStrLn $ "Announcing " ++ show ann

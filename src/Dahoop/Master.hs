@@ -50,14 +50,14 @@ data DistConfig = DistConfig {
                              ,_slaves         :: [Address Connect]}
 makeLenses ''DistConfig
 
-runAMaster :: Serialize a => EventHandler -> DistConfig -> ByteString -> [(WorkId, IO ByteString)] -> (a -> IO ()) -> IO ()
-runAMaster k config preloadData workbits f =
+runAMaster :: Serialize a => EventHandler -> DistConfig -> ByteString -> [IO ByteString] -> (a -> IO ()) -> IO ()
+runAMaster k config preloadData work f =
         runZMQ $ do jobCode <- liftIO M.generateJobCode
                     announceThread <- async (announce k (announcement config jobCode) (config ^. slaves))
                     -- liftIO . link $ announceThread
                     (liftIO . link) =<< async (preload k (config ^. preloadPort) preloadData)
                     k (Began jobCode)
-                    theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) workbits (liftIO . f)
+                    theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) work (liftIO . f)
                     liftIO (cancel announceThread)
                     broadcastFinished jobCode (config ^. slaves)
                     k Finished
@@ -105,9 +105,9 @@ broadcastFinished n ss =
 
 
 -- NOTE: Send and receive must be done using different sockets, as they are used in different threads
-theProcess' :: Serialize a  => EventHandler -> Int -> M.JobCode -> Int -> [(WorkId, IO ByteString)] -> (a -> ZMQ s ()) -> ZMQ s ()
-theProcess' k sendPort jc rport workbits yield = do
-  queue <- atomicallyIO $ buildWork workbits
+theProcess' :: Serialize a  => EventHandler -> Int -> M.JobCode -> Int -> [IO ByteString] -> (a -> ZMQ s ()) -> ZMQ s ()
+theProcess' k sendPort jc rport work yield = do
+  queue <- atomicallyIO $ buildWork work
   (liftIO . link) =<< async (dealWork k sendPort jc queue)
   waitForAllResults k yield rport queue
 
