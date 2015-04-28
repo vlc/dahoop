@@ -12,7 +12,6 @@ import System.Environment     (getArgs)
 import System.Exit            (exitFailure)
 import System.Random          (randomRIO)
 
-
 import qualified Dahoop.Master as M
 import qualified Dahoop.Slave  as S
 
@@ -33,7 +32,7 @@ master =
     let config = M.DistConfig 4001 4000 4002 (IP4' 127 0 0 1) someSlaves
         someSlaves = map f [5000, 5001] where f = TCP (IP4' 127 0 0 1)
         floats = [(1.0 :: Float)..3.0]
-        work = map (return . encode) floats
+        work = map return floats
         preloadData = 1.1 :: Float
      in M.runAMaster k config (encode preloadData) work (print :: Float -> IO ())
   where k :: M.EventHandler
