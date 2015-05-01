@@ -48,23 +48,21 @@ data WorkDetails a b c = forall m. (MonadIO m) =>
 runASlave :: (Serialize a, Serialize b, Serialize c, Serialize d) =>
              EventHandler -> (forall m. MonadIO m => WorkDetails a b c -> m d) -> Int -> IO ()
 runASlave k workFunction s =
-  forever $ (putStrLn "running zmq") >> runZMQ (do liftIO $ putStrLn "w t f"
-                                                   (v,queue) <- liftIO (putStrLn "creating ann queue") >> announcementsQueue s
-                                                   ann <- liftIO (putStrLn "waiting for ann") >> waitForAnnouncement k queue
-                                                   Right (preload :: c) <- decode <$> requestPreload k (ann ^. preloadAddress)
-                                                   worker <- async (do workIn  <- returning (socket Req)  (`connectM` (ann ^. askAddress))
-                                                                       workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
-                                                                       logOut  <- returning (socket Pub)  (`connectM` (ann ^. loggingAddress))
-                                                                       workLoop k workIn workOut logOut preload workFunction)
-                                                   waiter <- async (liftIO . waitForDone queue $ ann ^. annJobCode)
-                                                   liftIO $
-                                                           do _ <- waitAnyCancel [worker,waiter,v]
-                                                              -- If we don't threadDelay here, STM exceptions happen when we loop
-                                                              -- around and wait for a new job to do
+  forever $ runZMQ (do (v,queue) <- announcementsQueue s
+                       ann <- waitForAnnouncement k queue
+                       Right (preload :: c) <- decode <$> requestPreload k (ann ^. preloadAddress)
+                       worker <- async (do workIn  <- returning (socket Req)  (`connectM` (ann ^. askAddress))
+                                           workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
+                                           logOut  <- returning (socket Pub)  (`connectM` (ann ^. loggingAddress))
+                                           workLoop k workIn workOut logOut preload workFunction)
+                       waiter <- async (liftIO . waitForDone queue $ ann ^. annJobCode)
+                       liftIO $ do _ <- waitAnyCancel [worker,waiter,v]
+                                   -- If we don't threadDelay here, STM exceptions happen when we loop
+                                   -- around and wait for a new job to do
 
-                                                              -- I think it's because 0mq cleanup happens out of band somehow.
-                                                              threadDelay 500000
-                                                   return ())
+                                   -- I think it's because 0mq cleanup happens out of band somehow.
+                                   threadDelay 500000
+                       return ())
 
 waitForAnnouncement :: EventHandler -> TChan ByteString -> ZMQ z Announcement
 waitForAnnouncement k queue =
@@ -158,6 +156,3 @@ announcementsQueue port =
                          v <- receive subSocket
                          atomicallyIO (writeTChan queue v))
      return (v,queue)
-
-print' :: (MonadIO m, Show a) => a -> m ()
-print' = liftIO . print
