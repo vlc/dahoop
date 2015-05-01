@@ -5,7 +5,7 @@ module Dahoop.Internal.Messages
        (terminate, work, getWorkOrTerminate, Announcement(..), reply,
         getReply, generateJobCode, resultsAddress, preloadAddress,
         askAddress, annJobCode, JobCode(..), announcement, finishUp,
-        getAnnouncementOrFinishUp, WorkId)
+        getAnnouncementOrFinishUp, WorkId, loggingAddress)
        where
 
 import Control.Applicative ((<$>), (<*>))
@@ -69,7 +69,8 @@ data Announcement = Announcement {
   _annJobCode     :: JobCode,
   _resultsAddress :: Address Connect,
   _askAddress     :: Address Connect,
-  _preloadAddress :: Address Connect
+  _preloadAddress :: Address Connect,
+  _loggingAddress :: Address Connect
   } deriving (Generic, Eq, Show)
 
 makeLenses ''Announcement

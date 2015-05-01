@@ -46,6 +46,7 @@ data DistConfig = DistConfig {
                              _resultsPort     :: Int
                              ,_askPort        :: Int
                              ,_preloadPort    :: Int
+                             ,_loggingPort    :: Int
                              ,_connectAddress :: Connect
                              ,_slaves         :: [Address Connect]}
 makeLenses ''DistConfig
@@ -72,6 +73,7 @@ announcement v jc =
       (tcpHere (v ^. resultsPort))
       (tcpHere (v ^. askPort))
       (tcpHere (v ^. preloadPort))
+      (tcpHere (v ^. loggingPort))
   where tcpHere = TCP (v ^. connectAddress)
 
 announce :: EventHandler

@@ -1,8 +1,10 @@
+{-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE MultiWayIf          #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ExistentialQuantification #-}
 module Dahoop.Slave where
 
 import Control.Applicative      ((<$>), (<*))
@@ -13,8 +15,9 @@ import Control.Lens             ((^.))
 import Control.Monad            (forever)
 import Control.Monad.IO.Class   (MonadIO, liftIO)
 import Data.ByteString          (ByteString)
-import Data.Serialize           (Serialize, runGet, decode)
-import System.ZMQ4.Monadic      (EventMsg (MonitorStopped), EventType (AllEvents), Push (Push), Receiver, Req (Req),
+import Data.Serialize           (Serialize, runGet, encode, decode)
+import GHC.Generics             (Generic)
+import System.ZMQ4.Monadic      (EventMsg (MonitorStopped), EventType (AllEvents), Pub (Pub), Push (Push), Receiver, Req (Req),
                                  Sender, Socket, Sub (Sub), ZMQ, async, monitor, receive, runZMQ, send, socket,
                                  subscribe, waitRead)
 
@@ -35,8 +38,13 @@ data Events
   | WaitingForWorkReply
   | StartedUnit WorkId
   | FinishedUnit WorkId
-  | FinishedJob Int
-                JobCode deriving (Eq, Show)
+  | FinishedJob Int JobCode deriving (Eq, Show, Generic)
+
+instance Serialize Events
+
+data LogEntry a = DahoopEntry Events | UserEntry a deriving (Eq, Show, Generic)
+
+instance (Serialize a) => Serialize (LogEntry a)
 
 -- |
 -- A NOTE ABOUT CONCURRENCY
@@ -48,16 +56,22 @@ data Events
 
 type EventHandler = forall s. Events -> ZMQ s ()
 
-runASlave :: (Show c, Serialize a,Serialize b, Serialize c)
-          => EventHandler -> (c -> a -> IO b) -> Int -> IO ()
-runASlave k workerThread s =
+data WorkDetails a b c = forall m. (MonadIO m) =>
+                         WorkDetails { preload :: a,
+                                       payload :: b,
+                                       logger  :: c -> m () }
+
+runASlave :: (Serialize a, Serialize b, Serialize c, Serialize d) =>
+             EventHandler -> (forall m. MonadIO m => WorkDetails a b c -> m d) -> Int -> IO ()
+runASlave k workFunction s =
   forever $ (putStrLn "running zmq") >> runZMQ (do liftIO $ putStrLn "w t f"
                                                    (v,queue) <- liftIO (putStrLn "creating ann queue") >> announcementsQueue s
                                                    ann <- liftIO (putStrLn "waiting for ann") >> waitForAnnouncement k queue
                                                    Right (preload :: c) <- decode <$> requestPreload k (ann ^. preloadAddress)
-                                                   worker <- async (do workIn <- returning (socket Req) (`connectM` (ann ^. askAddress))
+                                                   worker <- async (do workIn  <- returning (socket Req)  (`connectM` (ann ^. askAddress))
                                                                        workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
-                                                                       workLoop k workIn workOut (workerThread preload))
+                                                                       logOut  <- returning (socket Pub)  (`connectM` (ann ^. loggingAddress))
+                                                                       workLoop k workIn workOut logOut preload workFunction)
                                                    waiter <- async (liftIO . waitForDone queue $ ann ^. annJobCode)
                                                    liftIO $
                                                            do _ <- waitAnyCancel [worker,waiter,v]
@@ -105,27 +119,32 @@ requestPreload k port =
      receive s <*
        k ReceivedPreload
 
-workLoop :: (Serialize s,Serialize a,Receiver t,Sender t1,Sender t)
-         => EventHandler
-         -> Socket z t
-         -> Socket z t1
-         -> (a -> IO s)
-         -> ZMQ z ()
-workLoop k workIn workOut f = loop (0 :: Int)
+workLoop :: forall a b c d t t1 t2 z. (Serialize a, Serialize b, Serialize c, Serialize d,
+             Receiver t, Sender t1, Sender t, Sender t2)
+            => EventHandler
+            -> Socket z t
+            -> Socket z t1
+            -> Socket z t2
+            -> a
+            -> (forall m. MonadIO m => WorkDetails a b c -> m d)
+            -> ZMQ z ()
+workLoop k workIn workOut logOut preload f = loop (0 :: Int)
   where loop c =
           do send workIn [] ""
-             k WaitingForWorkReply
+             sendDahoopLog WaitingForWorkReply
              input <- waitRead workIn >> receive workIn
              let Right n = runGet getWorkOrTerminate input -- HAHA, parsing never fails
              case n of
-               Left z -> k $ FinishedJob c z
+               Left z -> sendDahoopLog $ FinishedJob c z
                Right (wid, a) ->
-                 do k $ StartedUnit wid
-                    let Right a' = decode a
-                    result <- liftIO (f a')
+                 do sendDahoopLog (StartedUnit wid)
+                    let Right payload = decode a
+                    result <- f (WorkDetails preload payload sendUserLog)
                     send workOut [] . reply $ (wid, result)
-                    k $ FinishedUnit wid
+                    sendDahoopLog (FinishedUnit wid)
                     loop (succ c)
+        sendDahoopLog e = k e >> send logOut [] (encode $ (DahoopEntry e :: LogEntry c))
+        sendUserLog   e = send logOut [] (encode (UserEntry e))
 
 monitorUntilStopped :: Socket z t -> (Maybe EventMsg -> ZMQ z a) -> ZMQ z (Async (Maybe EventMsg))
 monitorUntilStopped skt yield =
