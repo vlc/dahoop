@@ -43,7 +43,7 @@ type EventHandler = forall s. SlaveEvent -> ZMQ s ()
 data WorkDetails a b c = forall m. (MonadIO m) =>
                          WorkDetails { preload :: a,
                                        payload :: b,
-                                       logger  :: c -> m () }
+                                       remoteLogger :: c -> m () }
 
 runASlave :: (Serialize a, Serialize b, Serialize c, Serialize d) =>
              EventHandler -> (forall m. MonadIO m => WorkDetails a b c -> m d) -> Int -> IO ()
