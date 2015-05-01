@@ -12,7 +12,8 @@ library
   exposed-modules:
     Dahoop.Master
     Dahoop.Slave
-
+    Dahoop.Event
+                  
     Dahoop.Utils
     Dahoop.ZMQ4
 

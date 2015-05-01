@@ -15,13 +15,14 @@ import Control.Lens             (makeLenses, (^.))
 import Control.Monad            (forever, unless)
 import Data.ByteString          (ByteString)
 import Data.List.NonEmpty       (NonEmpty ((:|)))
-import Data.Serialize           (runGet, encode, Serialize)
+import Data.Serialize           (runGet, encode, decode, Serialize)
 
-import System.ZMQ4.Monadic      (Pub (..), Pull (..), Receiver, Router (..), Sender, Socket, ZMQ, async, liftIO,
-                                 receive, receiveMulti, runZMQ, send, sendMulti, socket)
+import System.ZMQ4.Monadic      (Pub (..), Pull (..), Sub (..), Receiver, Router (..), Sender, Socket, ZMQ, async, liftIO,
+                                 receive, receiveMulti, runZMQ, send, sendMulti, socket, subscribe)
 
 import qualified Dahoop.Internal.Messages  as M
 import           Dahoop.Internal.WorkQueue
+import           Dahoop.Event
 import           Dahoop.Utils
 import           Dahoop.ZMQ4
 
@@ -31,16 +32,7 @@ import           Dahoop.ZMQ4
 
 -- MASTER
 
-data Events = Announcing M.Announcement
-            | Began M.JobCode
-            | WaitingForWorkRequest
-            | SentWork WorkId
-            | ReceivedResult WorkId
-            | SentTerminate
-            | Finished
-            | SentPreload deriving (Eq, Show)
-
-type EventHandler = forall s. Events -> ZMQ s ()
+type EventHandler c = forall s. MasterEvent c -> ZMQ s ()
 
 data DistConfig = DistConfig {
                              _resultsPort     :: Int
@@ -51,14 +43,15 @@ data DistConfig = DistConfig {
                              ,_slaves         :: [Address Connect]}
 makeLenses ''DistConfig
 
-runAMaster :: (Serialize a, Serialize b, Serialize c) => EventHandler -> DistConfig -> a -> [IO b] -> (c -> IO ()) -> IO ()
+runAMaster :: (Serialize a, Serialize b, Serialize c, Serialize l) =>
+              EventHandler l -> DistConfig -> a -> [IO b] -> (c -> IO ()) -> IO ()
 runAMaster k config preloadData work f =
         runZMQ $ do jobCode <- liftIO M.generateJobCode
                     announceThread <- async (announce k (announcement config jobCode) (config ^. slaves))
                     -- liftIO . link $ announceThread
                     (liftIO . link) =<< async (preload k (config ^. preloadPort) preloadData)
                     k (Began jobCode)
-                    theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) work (liftIO . f)
+                    theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) (config ^. loggingPort) work (liftIO . f)
                     liftIO (cancel announceThread)
                     broadcastFinished jobCode (config ^. slaves)
                     k Finished
@@ -76,7 +69,7 @@ announcement v jc =
       (tcpHere (v ^. loggingPort))
   where tcpHere = TCP (v ^. connectAddress)
 
-announce :: EventHandler
+announce :: EventHandler c
             -> M.Announcement
             -> [Address Connect]
             -> ZMQ s ()
@@ -94,7 +87,7 @@ announce k ann ss =
           -- we wait so that we don't spam more than necessary
           liftIO $ threadDelay 500000
 
-preload :: (Serialize a) => EventHandler -> Int -> a -> ZMQ s ()
+preload :: (Serialize a) => EventHandler c -> Int -> a -> ZMQ s ()
 preload k port preloadData = do s <- returning (socket Router) (`bindM` TCP Wildcard port)
                                 forever (replyToReq s (encode preloadData) >> k SentPreload)
 
@@ -107,13 +100,14 @@ broadcastFinished n ss =
 
 
 -- NOTE: Send and receive must be done using different sockets, as they are used in different threads
-theProcess' :: (Serialize a, Serialize c)  => EventHandler -> Int -> M.JobCode -> Int -> [IO a] -> (c -> ZMQ s ()) -> ZMQ s ()
-theProcess' k sendPort jc rport work yield = do
+theProcess' :: (Serialize a, Serialize c, Serialize l)  => EventHandler l -> Int -> M.JobCode -> Int -> Int -> [IO a] -> (c -> ZMQ s ()) -> ZMQ s ()
+theProcess' k sendPort jc rport logPort work yield = do
   queue <- atomicallyIO $ buildWork work
   (liftIO . link) =<< async (dealWork k sendPort jc queue)
+  (liftIO . link) =<< async (recieveLogs k logPort)
   waitForAllResults k yield rport queue
 
-dealWork :: (Serialize a) => EventHandler -> Int -> M.JobCode -> Work (IO a) -> ZMQ s ()
+dealWork :: (Serialize a) => EventHandler c -> Int -> M.JobCode -> Work (IO a) -> ZMQ s ()
 dealWork k port n queue =
   do sendSkt <- returning (socket Router)
                           (`bindM` TCP Wildcard port)
@@ -137,7 +131,18 @@ dealWork k port n queue =
                          (M.terminate n) <*
               k SentTerminate)
 
-waitForAllResults :: Serialize a => EventHandler -> (a -> ZMQ z a1) -> Int -> Work a2 -> ZMQ z ()
+recieveLogs :: forall c z. (Serialize c) => EventHandler c -> Int -> ZMQ z ()
+recieveLogs k logPort =
+  do logSocket <- returning (socket Sub)
+                            (`bindM` TCP Wildcard logPort)
+     subscribe logSocket "" -- Subscribe to every incoming message
+     forever $
+       do result <- receive logSocket
+          let Right logEntry = decode result :: Either String (SlaveLogEntry c)
+          k (RemoteEvent logEntry)
+     return ()
+
+waitForAllResults :: Serialize a => EventHandler c -> (a -> ZMQ z a1) -> Int -> Work a2 -> ZMQ z ()
 waitForAllResults k yield rp queue =
   do receiveSocket <- returning (socket Pull)
                                 (`bindM` TCP Wildcard rp)

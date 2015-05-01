@@ -16,12 +16,12 @@ import Control.Monad            (forever)
 import Control.Monad.IO.Class   (MonadIO, liftIO)
 import Data.ByteString          (ByteString)
 import Data.Serialize           (Serialize, runGet, encode, decode)
-import GHC.Generics             (Generic)
 import System.ZMQ4.Monadic      (EventMsg (MonitorStopped), EventType (AllEvents), Pub (Pub), Push (Push), Receiver, Req (Req),
                                  Sender, Socket, Sub (Sub), ZMQ, async, monitor, receive, runZMQ, send, socket,
                                  subscribe, waitRead)
 
 import Dahoop.Internal.Messages
+import Dahoop.Event
 import Dahoop.Utils
 import Dahoop.ZMQ4
 
@@ -29,22 +29,6 @@ import Dahoop.ZMQ4
 -- * Sending an abort message
 -- * Map the TChan to be typed with the ann/finish up message
 -- * Run many workers, maybe it'll just work!
-
-data Events
-  = AwaitingAnnouncement
-  | ReceivedAnnouncement Announcement
-  | RequestingPreload
-  | ReceivedPreload
-  | WaitingForWorkReply
-  | StartedUnit WorkId
-  | FinishedUnit WorkId
-  | FinishedJob Int JobCode deriving (Eq, Show, Generic)
-
-instance Serialize Events
-
-data LogEntry a = DahoopEntry Events | UserEntry a deriving (Eq, Show, Generic)
-
-instance (Serialize a) => Serialize (LogEntry a)
 
 -- |
 -- A NOTE ABOUT CONCURRENCY
@@ -54,7 +38,7 @@ instance (Serialize a) => Serialize (LogEntry a)
 -- any async tasks that are expected to run forever (in the context of a job) need to be
 -- explicitly cancelled
 
-type EventHandler = forall s. Events -> ZMQ s ()
+type EventHandler = forall s. SlaveEvent -> ZMQ s ()
 
 data WorkDetails a b c = forall m. (MonadIO m) =>
                          WorkDetails { preload :: a,
@@ -142,7 +126,7 @@ workLoop k workIn workOut logOut preload f = loop (0 :: Int)
                     send workOut [] . reply $ (wid, result)
                     sendDahoopLog (FinishedUnit wid)
                     loop (succ c)
-        sendDahoopLog e = k e >> send logOut [] (encode $ (DahoopEntry e :: LogEntry c))
+        sendDahoopLog e = k e >> send logOut [] (encode $ (DahoopEntry e :: SlaveLogEntry c))
         sendUserLog   e = send logOut [] (encode (UserEntry e))
 
 monitorUntilStopped :: Socket z t -> (Maybe EventMsg -> ZMQ z a) -> ZMQ z (Async (Maybe EventMsg))
