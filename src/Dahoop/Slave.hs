@@ -136,9 +136,8 @@ workLoop k workIn workOut logOut preload f = loop (0 :: Int)
              let Right n = runGet getWorkOrTerminate input -- HAHA, parsing never fails
              case n of
                Left z -> sendDahoopLog $ FinishedJob c z
-               Right (wid, a) ->
+               Right (wid, payload) ->
                  do sendDahoopLog (StartedUnit wid)
-                    let Right payload = decode a
                     result <- f (WorkDetails preload payload sendUserLog)
                     send workOut [] . reply $ (wid, result)
                     sendDahoopLog (FinishedUnit wid)

@@ -34,7 +34,7 @@ master =
         floats = [(1.0 :: Float)..3.0]
         work = map return floats
         preloadData = 1.1 :: Float
-     in M.runAMaster k config (encode preloadData) work (print :: Float -> IO ())
+     in M.runAMaster k config preloadData work (print :: Float -> IO ())
   where k :: M.EventHandler
         k = liftIO . \case
                         M.Announcing ann -> putStrLn $ "Announcing " ++ show ann

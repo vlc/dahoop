@@ -96,7 +96,7 @@ announce k ann ss =
 
 preload :: (Serialize a) => EventHandler -> Int -> a -> ZMQ s ()
 preload k port preloadData = do s <- returning (socket Router) (`bindM` TCP Wildcard port)
-                                forever (replyToReq s preloadData >> k SentPreload)
+                                forever (replyToReq s (encode preloadData) >> k SentPreload)
 
 broadcastFinished :: M.JobCode -> [Address Connect] -> ZMQ z ()
 broadcastFinished n ss =
@@ -157,18 +157,18 @@ waitForAllResults k yield rp queue =
 
 -- | 0mq Utils
 
-replyToReq :: (Serialize a) => forall z. Socket z Router -> a -> ZMQ z ()
+replyToReq :: Socket z Router -> ByteString -> ZMQ z ()
 replyToReq sendSkt m =
   do replyWith <- replyarama sendSkt
      replyWith m
 
-replyarama :: (Serialize a, Receiver t, Sender t) => Socket z t -> ZMQ z (a -> ZMQ z ())
+replyarama :: (Receiver t, Sender t) => Socket z t -> ZMQ z (ByteString -> ZMQ z ())
 replyarama s =
   do (peer:_) <- receiveMulti s
      return (sendToReq s peer)
 
-sendToReq :: (Serialize a, Sender t) => Socket z t -> ByteString -> a -> ZMQ z ()
+sendToReq :: (Sender t) => Socket z t -> ByteString -> ByteString -> ZMQ z ()
 sendToReq skt peer msg =
   sendMulti skt
             (peer :|
-             ["",encode msg])
+             ["", msg])
