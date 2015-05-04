@@ -12,7 +12,8 @@ import Control.Applicative      ((<*))
 import Control.Concurrent       (threadDelay)
 import Control.Concurrent.Async (cancel, link)
 import Control.Lens             (makeLenses, (^.))
-import Control.Monad            (forever, unless)
+import Control.Monad            (forever, unless, when)
+import Debug.Trace
 import Data.ByteString          (ByteString)
 import Data.List.NonEmpty       (NonEmpty ((:|)))
 import Data.Serialize           (runGet, encode, decode, Serialize)
@@ -105,27 +106,32 @@ theProcess' k sendPort jc rport logPort work yield = do
   queue <- atomicallyIO $ buildWork work
   (liftIO . link) =<< async (dealWork k sendPort jc queue)
   (liftIO . link) =<< async (receiveLogs k logPort)
-  waitForAllResults k yield rport queue
+  waitForAllResults k yield rport jc queue
 
 dealWork :: (Serialize a) => EventHandler c -> Int -> M.JobCode -> Work (IO a) -> ZMQ s ()
 dealWork k port n queue =
   do sendSkt <- returning (socket Router)
                           (`bindM` TCP Wildcard port)
      let loop =
-           do replyWith <- replyarama sendSkt
-              item <- (atomicallyIO . start) queue
-              case item of
-                Just (wid,Repeats _, builder) -> do
-                  -- if we've just started repeating, we could return
-                  -- the item to the queue (unGetTQueue), tell the client to hold tight
-                  -- for a little while, sleep for a bit, then loop.
-                  -- this would give time for recently received results to
-                  -- get processed, and also give time for slightly slower slaves
-                  -- to get their results in
-                  thing <- liftIO builder
-                  (replyWith . M.work) (wid,thing) >> loop
-                Nothing ->
-                  replyWith (M.terminate n)
+           do (request, replyWith) <- replyarama sendSkt
+              let Right slaveJc = decode request
+              if (slaveJc /= n) then do
+                replyWith (M.terminate slaveJc)
+                loop
+              else do
+                item <- (atomicallyIO . start) queue
+                case item of
+                  Just (wid,Repeats _, builder) -> do
+                    -- if we've just started repeating, we could return
+                    -- the item to the queue (unGetTQueue), tell the client to hold tight
+                    -- for a little while, sleep for a bit, then loop.
+                    -- this would give time for recently received results to
+                    -- get processed, and also give time for slightly slower slaves
+                    -- to get their results in
+                    thing <- liftIO builder
+                    (replyWith . M.work) (wid,thing) >> loop
+                  Nothing ->
+                    replyWith (M.terminate n)
      loop
      forever (replyToReq sendSkt
                          (M.terminate n) <*
@@ -142,20 +148,23 @@ receiveLogs k logPort =
           k (RemoteEvent slaveid logEntry)
      return ()
 
-waitForAllResults :: Serialize a => EventHandler c -> (a -> ZMQ z a1) -> Int -> Work a2 -> ZMQ z ()
-waitForAllResults k yield rp queue =
+waitForAllResults :: Serialize a => EventHandler c -> (a -> ZMQ z a1) -> Int -> M.JobCode -> Work a2 -> ZMQ z ()
+waitForAllResults k yield rp jc queue =
   do receiveSocket <- returning (socket Pull)
                                 (`bindM` TCP Wildcard rp)
      let loop =
            do result <- receive receiveSocket
-              let Right (wid,stuff) =
+              let Right (slaveJc, wid, stuff) =
                     runGet M.getReply result
-              -- TODO What if the result is for the wrong job code?
-              k (ReceivedResult wid)
-              yield stuff
-              completed <- atomicallyIO
-                             (do _ <- complete wid queue
-                                 isComplete queue)
+              -- If a slave is sending work for the wrong job code,
+              -- it will be killed when it asks for the next bit of work
+              when (jc == slaveJc) $ do
+                k (ReceivedResult wid)
+                yield stuff
+                atomicallyIO $ complete wid queue
+                return ()
+
+              completed <- atomicallyIO $ isComplete queue
               unless completed loop
      loop
      return ()
@@ -164,13 +173,13 @@ waitForAllResults k yield rp queue =
 
 replyToReq :: Socket z Router -> ByteString -> ZMQ z ()
 replyToReq sendSkt m =
-  do replyWith <- replyarama sendSkt
+  do (_, replyWith) <- replyarama sendSkt
      replyWith m
 
-replyarama :: (Receiver t, Sender t) => Socket z t -> ZMQ z (ByteString -> ZMQ z ())
+replyarama :: (Receiver t, Sender t) => Socket z t -> ZMQ z (ByteString, ByteString -> ZMQ z ())
 replyarama s =
-  do (peer:_) <- receiveMulti s
-     return (sendToReq s peer)
+  do (peer:_:request:_) <- receiveMulti s
+     return (request, sendToReq s peer)
 
 sendToReq :: (Sender t) => Socket z t -> ByteString -> ByteString -> ZMQ z ()
 sendToReq skt peer msg =

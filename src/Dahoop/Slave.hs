@@ -56,7 +56,7 @@ runASlave k workFunction s =
                        worker <- async (do workIn  <- returning (socket Req)  (`connectM` (ann ^. askAddress))
                                            workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
                                            logOut  <- returning (socket Pub)  (`connectM` (ann ^. loggingAddress))
-                                           workLoop (SlaveId h s)k workIn workOut logOut preload workFunction)
+                                           workLoop (SlaveId h s) (ann ^. annJobCode) k workIn workOut logOut preload workFunction)
                        waiter <- async (liftIO . waitForDone queue $ ann ^. annJobCode)
                        liftIO $ do _ <- waitAnyCancel [worker,waiter,v]
                                    -- If we don't threadDelay here, STM exceptions happen when we loop
@@ -106,6 +106,7 @@ requestPreload k port =
 workLoop :: forall a b c d t t1 t2 z. (Serialize a, Serialize b, Serialize c, Serialize d,
              Receiver t, Sender t1, Sender t, Sender t2)
             => SlaveId
+            -> JobCode
             -> EventHandler
             -> Socket z t
             -> Socket z t1
@@ -113,9 +114,9 @@ workLoop :: forall a b c d t t1 t2 z. (Serialize a, Serialize b, Serialize c, Se
             -> a
             -> (forall m. MonadIO m => WorkDetails a b c -> m d)
             -> ZMQ z ()
-workLoop slaveid k workIn workOut logOut preload f = loop (0 :: Int)
+workLoop slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
   where loop c =
-          do send workIn [] ""
+          do send workIn [] (encode jc)
              sendDahoopLog WaitingForWorkReply
              input <- waitRead workIn >> receive workIn
              let Right n = runGet getWorkOrTerminate input -- HAHA, parsing never fails
@@ -124,7 +125,7 @@ workLoop slaveid k workIn workOut logOut preload f = loop (0 :: Int)
                Right (wid, payload) ->
                  do sendDahoopLog (StartedUnit wid)
                     result <- f (WorkDetails preload payload sendUserLog)
-                    send workOut [] . reply $ (wid, result)
+                    send workOut [] . reply $ (jc, wid, result)
                     sendDahoopLog (FinishedUnit wid)
                     loop (succ c)
         sendDahoopLog e = k e >> send logOut [] (encode $ (slaveid, (DahoopEntry e :: SlaveLogEntry c)))

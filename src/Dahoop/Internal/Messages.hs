@@ -46,11 +46,11 @@ getWorkOrTerminate :: Serialize a => Get (Either JobCode (WorkId, a))
 getWorkOrTerminate = get
 
 -- | Slave -> Master, Respond to a work message with a result
-reply :: Serialize a => (WorkId, a) -> ByteString
+reply :: Serialize a => (JobCode, WorkId, a) -> ByteString
 reply = runPut . put
 
 -- | Master: Decode reply
-getReply :: Serialize a => Get (WorkId, a)
+getReply :: Serialize a => Get (JobCode, WorkId, a)
 getReply = get
 
 -- ****************************
