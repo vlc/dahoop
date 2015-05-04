@@ -21,9 +21,9 @@ makePrisms ''WorkId
 
 -- | Out work queue
 data Work a =
-
-  Work {_todo :: TQueue (WorkId,History,a)
-       ,_done :: TVar (M.Map WorkId Int)}
+  Work { _todo :: TQueue (WorkId, History, a)
+       , _done :: TVar (M.Map WorkId Int)
+       , _size :: Int }
 -- invariants: in a fresh queue, all keys in the map are in the queue
 
 -- The state that a work item transition
@@ -32,7 +32,7 @@ newtype History = Repeats Int deriving (Eq, Show, Num, Enum)
 makeLenses ''Work
 
 buildWork :: [a] -> STM (Work a)
-buildWork ws = Work <$> initialQueue <*> newTVar initMap
+buildWork ws = Work <$> initialQueue <*> newTVar initMap <*> pure (length ws)
   where initialQueue =
           do q <- newTQueue
              _ <- traverse (\(wid, a) -> writeTQueue q (wid,Repeats 0,a)) idWork
@@ -91,3 +91,7 @@ isComplete :: Work a -> STM Bool
 isComplete w = do doned <- readTVar $ _done w
                   return $ all (> 0) doned
   -- we are done if all keys in the map are >0
+
+progress :: Work a -> STM Float
+progress w = do donecount <- fmap M.size $ readTVar $ _done w
+                return (fromIntegral donecount / fromIntegral (w ^. size))
