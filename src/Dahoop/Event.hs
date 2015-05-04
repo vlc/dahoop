@@ -2,6 +2,7 @@
 module Dahoop.Event where
 
 import Data.Serialize           (Serialize)
+import Network.HostName
 import GHC.Generics             (Generic)
 
 import Dahoop.Internal.Messages
@@ -15,7 +16,7 @@ data MasterEvent c
   | SentTerminate
   | Finished
   | SentPreload
-  | RemoteEvent (SlaveLogEntry c) deriving (Eq, Show)
+  | RemoteEvent SlaveId (SlaveLogEntry c) deriving (Eq, Show)
 
 data SlaveEvent
   = AwaitingAnnouncement
@@ -32,3 +33,9 @@ instance Serialize SlaveEvent
 data SlaveLogEntry a = DahoopEntry SlaveEvent | UserEntry a deriving (Eq, Show, Generic)
 
 instance (Serialize a) => Serialize (SlaveLogEntry a)
+
+data SlaveId = SlaveId { slaveHostName :: HostName,
+                         slavePort     :: Int
+                       } deriving (Eq, Show, Generic)
+
+instance Serialize SlaveId

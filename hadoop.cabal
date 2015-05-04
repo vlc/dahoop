@@ -34,6 +34,7 @@ library
                , transformers
                , zeromq4-haskell
                , uuid
+               , hostname
 
 executable example
   main-is:             Main.hs

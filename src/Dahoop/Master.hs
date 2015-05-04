@@ -138,8 +138,8 @@ receiveLogs k logPort =
      subscribe logSocket "" -- Subscribe to every incoming message
      forever $
        do result <- receive logSocket
-          let Right logEntry = decode result :: Either String (SlaveLogEntry c)
-          k (RemoteEvent logEntry)
+          let Right (slaveid, logEntry) = decode result :: Either String (SlaveId, SlaveLogEntry c)
+          k (RemoteEvent slaveid logEntry)
      return ()
 
 waitForAllResults :: Serialize a => EventHandler c -> (a -> ZMQ z a1) -> Int -> Work a2 -> ZMQ z ()

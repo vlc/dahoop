@@ -16,6 +16,7 @@ import Control.Monad            (forever)
 import Control.Monad.IO.Class   (MonadIO, liftIO)
 import Data.ByteString          (ByteString)
 import Data.Serialize           (Serialize, runGet, encode, decode)
+import Network.HostName
 import System.ZMQ4.Monadic      (EventMsg (MonitorStopped), EventType (AllEvents), Pub (Pub), Push (Push), Receiver, Req (Req),
                                  Sender, Socket, Sub (Sub), ZMQ, async, monitor, receive, runZMQ, send, socket,
                                  subscribe, waitRead)
@@ -50,11 +51,12 @@ runASlave :: (Serialize a, Serialize b, Serialize c, Serialize d) =>
 runASlave k workFunction s =
   forever $ runZMQ (do (v,queue) <- announcementsQueue s
                        ann <- waitForAnnouncement k queue
+                       h   <- liftIO $ getHostName
                        Right (preload :: c) <- decode <$> requestPreload k (ann ^. preloadAddress)
                        worker <- async (do workIn  <- returning (socket Req)  (`connectM` (ann ^. askAddress))
                                            workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
                                            logOut  <- returning (socket Pub)  (`connectM` (ann ^. loggingAddress))
-                                           workLoop k workIn workOut logOut preload workFunction)
+                                           workLoop (SlaveId h s)k workIn workOut logOut preload workFunction)
                        waiter <- async (liftIO . waitForDone queue $ ann ^. annJobCode)
                        liftIO $ do _ <- waitAnyCancel [worker,waiter,v]
                                    -- If we don't threadDelay here, STM exceptions happen when we loop
@@ -103,14 +105,15 @@ requestPreload k port =
 
 workLoop :: forall a b c d t t1 t2 z. (Serialize a, Serialize b, Serialize c, Serialize d,
              Receiver t, Sender t1, Sender t, Sender t2)
-            => EventHandler
+            => SlaveId
+            -> EventHandler
             -> Socket z t
             -> Socket z t1
             -> Socket z t2
             -> a
             -> (forall m. MonadIO m => WorkDetails a b c -> m d)
             -> ZMQ z ()
-workLoop k workIn workOut logOut preload f = loop (0 :: Int)
+workLoop slaveid k workIn workOut logOut preload f = loop (0 :: Int)
   where loop c =
           do send workIn [] ""
              sendDahoopLog WaitingForWorkReply
@@ -124,8 +127,8 @@ workLoop k workIn workOut logOut preload f = loop (0 :: Int)
                     send workOut [] . reply $ (wid, result)
                     sendDahoopLog (FinishedUnit wid)
                     loop (succ c)
-        sendDahoopLog e = k e >> send logOut [] (encode $ (DahoopEntry e :: SlaveLogEntry c))
-        sendUserLog   e = send logOut [] (encode (UserEntry e))
+        sendDahoopLog e = k e >> send logOut [] (encode $ (slaveid, (DahoopEntry e :: SlaveLogEntry c)))
+        sendUserLog   e = send logOut [] (encode (slaveid, UserEntry e))
 
 monitorUntilStopped :: Socket z t -> (Maybe EventMsg -> ZMQ z a) -> ZMQ z (Async (Maybe EventMsg))
 monitorUntilStopped skt yield =

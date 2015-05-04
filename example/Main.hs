@@ -44,7 +44,7 @@ master =
                         E.SentTerminate -> return ()
                         E.Finished -> putStrLn "Finished"
                         E.SentPreload -> putStrLn "Sent preload"
-                        E.RemoteEvent e -> putStrLn (show e)
+                        E.RemoteEvent slaveid e -> print (slaveid, e)
 
 -- SLAVE
 slave :: Int -> IO ()
