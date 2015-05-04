@@ -13,7 +13,6 @@ import Control.Concurrent       (threadDelay)
 import Control.Concurrent.Async (cancel, link)
 import Control.Lens             (makeLenses, (^.))
 import Control.Monad            (forever, unless, when)
-import Debug.Trace
 import Data.ByteString          (ByteString)
 import Data.List.NonEmpty       (NonEmpty ((:|)))
 import Data.Serialize           (runGet, encode, decode, Serialize)
@@ -33,7 +32,7 @@ import           Dahoop.ZMQ4
 
 -- MASTER
 
-type EventHandler c = forall s. MasterEvent c -> ZMQ s ()
+type EventHandler c = MasterEvent c -> IO ()
 
 data DistConfig = DistConfig {
                              _resultsPort     :: Int
@@ -51,11 +50,11 @@ runAMaster k config preloadData work f =
                     announceThread <- async (announce k (announcement config jobCode) (config ^. slaves))
                     -- liftIO . link $ announceThread
                     (liftIO . link) =<< async (preload k (config ^. preloadPort) preloadData)
-                    k (Began jobCode)
+                    liftIO $ k (Began jobCode)
                     theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) (config ^. loggingPort) work (liftIO . f)
                     liftIO (cancel announceThread)
                     broadcastFinished jobCode (config ^. slaves)
-                    k Finished
+                    liftIO $ k Finished
                     return ()
 
 announcement :: DistConfig
@@ -81,7 +80,7 @@ announce k ann ss =
      -- that have connected.
      -- Need to give some time for the slave connections to complete
      liftIO (threadDelay 500000)
-     k (Announcing ann)
+     liftIO $ k (Announcing ann)
      forever $
        do
           (send announceSocket [] . M.announcement) ann
@@ -90,7 +89,7 @@ announce k ann ss =
 
 preload :: (Serialize a) => EventHandler c -> Int -> a -> ZMQ s ()
 preload k port preloadData = do s <- returning (socket Router) (`bindM` TCP Wildcard port)
-                                forever (replyToReq s (encode preloadData) >> k SentPreload)
+                                forever (replyToReq s (encode preloadData) >> liftIO (k SentPreload))
 
 broadcastFinished :: M.JobCode -> [Address Connect] -> ZMQ z ()
 broadcastFinished n ss =
@@ -135,7 +134,7 @@ dealWork k port n queue =
      loop
      forever (replyToReq sendSkt
                          (M.terminate n) <*
-              k SentTerminate)
+              liftIO (k SentTerminate))
 
 receiveLogs :: forall c z. (Serialize c) => EventHandler c -> Int -> ZMQ z ()
 receiveLogs k logPort =
@@ -145,7 +144,7 @@ receiveLogs k logPort =
      forever $
        do result <- receive logSocket
           let Right (slaveid, logEntry) = decode result :: Either String (SlaveId, SlaveLogEntry c)
-          k (RemoteEvent slaveid logEntry)
+          liftIO $ k (RemoteEvent slaveid logEntry)
      return ()
 
 waitForAllResults :: Serialize a => EventHandler c -> (a -> ZMQ z a1) -> Int -> M.JobCode -> Work a2 -> ZMQ z ()
@@ -159,7 +158,7 @@ waitForAllResults k yield rp jc queue =
               -- If a slave is sending work for the wrong job code,
               -- it will be killed when it asks for the next bit of work
               when (jc == slaveJc) $ do
-                k (ReceivedResult wid)
+                liftIO $ k (ReceivedResult wid)
                 yield stuff
                 atomicallyIO $ complete wid queue
                 return ()

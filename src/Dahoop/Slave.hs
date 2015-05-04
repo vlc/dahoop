@@ -39,7 +39,7 @@ import Dahoop.ZMQ4
 -- any async tasks that are expected to run forever (in the context of a job) need to be
 -- explicitly cancelled
 
-type EventHandler = forall s. SlaveEvent -> ZMQ s ()
+type EventHandler = SlaveEvent -> IO ()
 
 data WorkDetails a b c = forall m. (MonadIO m) =>
                          WorkDetails { preload :: a,
@@ -68,10 +68,9 @@ runASlave k workFunction s =
 
 waitForAnnouncement :: EventHandler -> TChan ByteString -> ZMQ z Announcement
 waitForAnnouncement k queue =
-  do k AwaitingAnnouncement
+  do liftIO $ k AwaitingAnnouncement
      ann <- atomicallyIO loop
-     k $
-       ReceivedAnnouncement ann
+     liftIO $ k (ReceivedAnnouncement ann)
      return ann
   where
         -- There's apparently a thing where subscriptions might see old messages, if you bind with a Sub, and connect
@@ -98,10 +97,10 @@ requestPreload :: EventHandler -> Address Connect -> ZMQ z ByteString
 requestPreload k port =
   do s <- socket Req
      connectM s port
-     k RequestingPreload
+     liftIO $ k RequestingPreload
      send s [] ""
      receive s <*
-       k ReceivedPreload
+       liftIO (k ReceivedPreload)
 
 workLoop :: forall a b c d t t1 t2 z. (Serialize a, Serialize b, Serialize c, Serialize d,
              Receiver t, Sender t1, Sender t, Sender t2)
@@ -128,7 +127,7 @@ workLoop slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
                     send workOut [] . reply $ (jc, wid, result)
                     sendDahoopLog (FinishedUnit wid)
                     loop (succ c)
-        sendDahoopLog e = k e >> send logOut [] (encode $ (slaveid, (DahoopEntry e :: SlaveLogEntry c)))
+        sendDahoopLog e = liftIO (k e) >> send logOut [] (encode $ (slaveid, (DahoopEntry e :: SlaveLogEntry c)))
         sendUserLog   e = send logOut [] (encode (slaveid, UserEntry e))
 
 monitorUntilStopped :: Socket z t -> (Maybe EventMsg -> ZMQ z a) -> ZMQ z (Async (Maybe EventMsg))

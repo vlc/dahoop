@@ -35,16 +35,16 @@ master =
         preloadData = 1.1 :: Float
      in M.runAMaster k config preloadData work (print :: Float -> IO ())
   where k :: M.EventHandler String
-        k = liftIO . \case
-                        E.Announcing ann -> putStrLn $ "Announcing " ++ show ann
-                        E.Began n -> putStrLn $ "Job #" ++ show n
-                        E.WaitingForWorkRequest -> putStrLn "Waiting for slave"
-                        E.SentWork a -> putStrLn $ "Sent work " ++ show a
-                        E.ReceivedResult a -> putStrLn $ "Received result " ++ show a
-                        E.SentTerminate -> return ()
-                        E.Finished -> putStrLn "Finished"
-                        E.SentPreload -> putStrLn "Sent preload"
-                        E.RemoteEvent slaveid e -> print (slaveid, e)
+        k e = case e of
+               E.Announcing ann -> putStrLn $ "Announcing " ++ show ann
+               E.Began n -> putStrLn $ "Job #" ++ show n
+               E.WaitingForWorkRequest -> putStrLn "Waiting for slave"
+               E.SentWork a -> putStrLn $ "Sent work " ++ show a
+               E.ReceivedResult a -> putStrLn $ "Received result " ++ show a
+               E.SentTerminate -> return ()
+               E.Finished -> putStrLn "Finished"
+               E.SentPreload -> putStrLn "Sent preload"
+               E.RemoteEvent slaveid se -> print (slaveid, se)
 
 -- SLAVE
 slave :: Int -> IO ()
@@ -56,16 +56,14 @@ slave = S.runASlave k workerThread
              liftIO $ threadDelay (1000000 * delay)
              return (log a + preload)
         k :: S.EventHandler
-        k =
-          liftIO .
-          \case
-            E.AwaitingAnnouncement -> putStrLn "Waiting for job"
-            E.ReceivedAnnouncement a -> putStrLn $ "Received " ++ show a
-            E.StartedUnit a -> putStrLn $ "Started unit " ++ show a
-            E.FinishedUnit a -> putStrLn $ "Finished unit " ++ show a
-            E.FinishedJob units job ->
-              putStrLn ("Worked " ++ show units ++ " units of job " ++ show job)
-            E.ReceivedPreload ->
-              putStrLn "Preload arrived"
-            E.RequestingPreload -> putStrLn "Requesting payload"
-            E.WaitingForWorkReply -> putStrLn "Waiting for work reply"
+        k e = case e of
+               E.AwaitingAnnouncement -> putStrLn "Waiting for job"
+               E.ReceivedAnnouncement a -> putStrLn $ "Received " ++ show a
+               E.StartedUnit a -> putStrLn $ "Started unit " ++ show a
+               E.FinishedUnit a -> putStrLn $ "Finished unit " ++ show a
+               E.FinishedJob units job ->
+                 putStrLn ("Worked " ++ show units ++ " units of job " ++ show job)
+               E.ReceivedPreload ->
+                 putStrLn "Preload arrived"
+               E.RequestingPreload -> putStrLn "Requesting payload"
+               E.WaitingForWorkReply -> putStrLn "Waiting for work reply"
