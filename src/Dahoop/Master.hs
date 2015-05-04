@@ -104,7 +104,7 @@ theProcess' :: (Serialize a, Serialize c, Serialize l)  => EventHandler l -> Int
 theProcess' k sendPort jc rport logPort work yield = do
   queue <- atomicallyIO $ buildWork work
   (liftIO . link) =<< async (dealWork k sendPort jc queue)
-  (liftIO . link) =<< async (recieveLogs k logPort)
+  (liftIO . link) =<< async (receiveLogs k logPort)
   waitForAllResults k yield rport queue
 
 dealWork :: (Serialize a) => EventHandler c -> Int -> M.JobCode -> Work (IO a) -> ZMQ s ()
@@ -131,8 +131,8 @@ dealWork k port n queue =
                          (M.terminate n) <*
               k SentTerminate)
 
-recieveLogs :: forall c z. (Serialize c) => EventHandler c -> Int -> ZMQ z ()
-recieveLogs k logPort =
+receiveLogs :: forall c z. (Serialize c) => EventHandler c -> Int -> ZMQ z ()
+receiveLogs k logPort =
   do logSocket <- returning (socket Sub)
                             (`bindM` TCP Wildcard logPort)
      subscribe logSocket "" -- Subscribe to every incoming message
