@@ -12,7 +12,7 @@ data MasterEvent c
   | Began JobCode
   | WaitingForWorkRequest
   | SentWork WorkId
-  | ReceivedResult WorkId
+  | ReceivedResult WorkId Float
   | SentTerminate
   | Finished
   | SentPreload

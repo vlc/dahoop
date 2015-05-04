@@ -159,9 +159,11 @@ waitForAllResults k yield rp jc queue =
               -- If a slave is sending work for the wrong job code,
               -- it will be killed when it asks for the next bit of work
               when (jc == slaveJc) $ do
-                liftIO $ k (ReceivedResult wid)
                 yield stuff
-                atomicallyIO $ complete wid queue
+                p <- atomicallyIO $ do
+                  complete wid queue
+                  progress queue
+                liftIO $ k (ReceivedResult wid p)
                 return ()
 
               completed <- atomicallyIO $ isComplete queue
