@@ -40,7 +40,7 @@ master =
                E.Began n -> putStrLn $ "Job #" ++ show n
                E.WaitingForWorkRequest -> putStrLn "Waiting for slave"
                E.SentWork a -> putStrLn $ "Sent work " ++ show a
-               E.ReceivedResult a -> putStrLn $ "Received result " ++ show a
+               E.ReceivedResult a p -> putStrLn $ "Received result " ++ show a ++ " (" ++ show (round $ 100 * p) ++ "%)"
                E.SentTerminate -> return ()
                E.Finished -> putStrLn "Finished"
                E.SentPreload -> putStrLn "Sent preload"
