@@ -120,7 +120,7 @@ dealWork k port n queue =
               else do
                 item <- (atomicallyIO . start) queue
                 case item of
-                  Just (wid,Repeats _, builder) -> do
+                  Just (wid, Repeats _, builder) -> do
                     -- if we've just started repeating, we could return
                     -- the item to the queue (unGetTQueue), tell the client to hold tight
                     -- for a little while, sleep for a bit, then loop.
@@ -128,6 +128,7 @@ dealWork k port n queue =
                     -- get processed, and also give time for slightly slower slaves
                     -- to get their results in
                     thing <- liftIO builder
+                    liftIO $ k (SentWork wid)
                     (replyWith . M.work) (wid,thing) >> loop
                   Nothing ->
                     replyWith (M.terminate n)
