@@ -1,10 +1,11 @@
-{-# LANGUAGE DeriveGeneric       #-}
-{-# LANGUAGE LambdaCase          #-}
-{-# LANGUAGE MultiWayIf          #-}
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE RankNTypes          #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ConstraintKinds           #-}
+{-# LANGUAGE DeriveGeneric             #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE MultiWayIf                #-}
+{-# LANGUAGE OverloadedStrings         #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
 module Dahoop.Slave where
 
 import Control.Applicative      ((<$>), (<*))
@@ -13,13 +14,16 @@ import Control.Concurrent.Async hiding (async)
 import Control.Concurrent.STM
 import Control.Lens             ((^.))
 import Control.Monad            (forever)
+import Control.Monad.Trans
+import Control.Monad.Trans.Control
+import qualified Control.Concurrent.Async.Lifted.Safe as A
 import Control.Monad.IO.Class   (MonadIO, liftIO)
 import Data.ByteString          (ByteString)
 import Data.Serialize           (Serialize, runGet, encode, decode)
 import Network.HostName
 import System.ZMQ4.Monadic      (EventMsg (MonitorStopped), EventType (AllEvents), Pub (Pub), Push (Push), Receiver, Req (Req),
-                                 Sender, Socket, Sub (Sub), ZMQ, async, monitor, receive, runZMQ, send, socket,
-                                 subscribe, waitRead)
+                                 Sender, Sub (Sub))
+import Dahoop.ZMQ4.Trans        (ZMQT, Socket, async, monitor, receive, runZMQT, send, socket, subscribe, waitRead)
 
 import Dahoop.Internal.Messages
 import Dahoop.Event
@@ -39,39 +43,38 @@ import Dahoop.ZMQ4
 -- any async tasks that are expected to run forever (in the context of a job) need to be
 -- explicitly cancelled
 
-type EventHandler = forall s. SlaveEvent -> ZMQ s ()
+type EventHandler m = SlaveEvent -> m ()
 
-data WorkDetails a b c = forall m. (MonadIO m) =>
-                         WorkDetails { preload :: a,
-                                       payload :: b,
-                                       remoteLogger :: c -> m () }
+data WorkDetails m a b c = WorkDetails { preload :: a,
+                                         payload :: b,
+                                         remoteLogger :: c -> m () }
 
-runASlave :: (Serialize a, Serialize b, Serialize c, Serialize d) =>
-             EventHandler -> (forall m. MonadIO m => WorkDetails a b c -> m d) -> Int -> IO ()
+runASlave :: (MonadIO m, MonadBaseControl IO m, A.Forall (A.Pure m),
+              Serialize a, Serialize b, Serialize c, Serialize d)
+          => EventHandler m -> (forall m. (MonadIO m) => WorkDetails m a b c -> m d) -> Int -> m ()
 runASlave k workFunction s =
-  forever $ runZMQ (do (v,queue) <- announcementsQueue s
-                       ann <- waitForAnnouncement k queue
-                       h   <- liftIO $ getHostName
-                       Right (preload :: c) <- decode <$> requestPreload k (ann ^. preloadAddress)
-                       worker <- async (do workIn  <- returning (socket Req)  (`connectM` (ann ^. askAddress))
-                                           workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
-                                           logOut  <- returning (socket Pub)  (`connectM` (ann ^. loggingAddress))
-                                           workLoop (SlaveId h s) (ann ^. annJobCode) k workIn workOut logOut preload workFunction)
-                       waiter <- async (liftIO . waitForDone queue $ ann ^. annJobCode)
-                       liftIO $ do _ <- waitAnyCancel [worker,waiter,v]
-                                   -- If we don't threadDelay here, STM exceptions happen when we loop
-                                   -- around and wait for a new job to do
+  forever $ runZMQT (do (v,queue) <- announcementsQueue s
+                        ann <- waitForAnnouncement k queue
+                        h   <- liftIO $ getHostName
+                        Right (preload :: c) <- decode <$> requestPreload k (ann ^. preloadAddress)
+                        worker <- async (do workIn  <- returning (socket Req)  (`connectM` (ann ^. askAddress))
+                                            workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
+                                            logOut  <- returning (socket Pub)  (`connectM` (ann ^. loggingAddress))
+                                            workLoop (SlaveId h s) (ann ^. annJobCode) k workIn workOut logOut preload workFunction)
+                        waiter <- async (liftIO . waitForDone queue $ ann ^. annJobCode)
+                        liftIO $ do _ <- waitAnyCancel [worker,waiter,v]
+                                    -- If we don't threadDelay here, STM exceptions happen when we loop
+                                    -- around and wait for a new job to do
 
-                                   -- I think it's because 0mq cleanup happens out of band somehow.
-                                   threadDelay 500000
-                       return ())
+                                    -- I think it's because 0mq cleanup happens out of band somehow.
+                                    threadDelay 500000
+                        return ())
 
-waitForAnnouncement :: EventHandler -> TChan ByteString -> ZMQ z Announcement
+waitForAnnouncement :: (MonadIO m) => EventHandler m -> TChan ByteString -> ZMQT z m Announcement
 waitForAnnouncement k queue =
-  do k AwaitingAnnouncement
+  do lift $ k AwaitingAnnouncement
      ann <- atomicallyIO loop
-     k $
-       ReceivedAnnouncement ann
+     lift $ k (ReceivedAnnouncement ann)
      return ann
   where
         -- There's apparently a thing where subscriptions might see old messages, if you bind with a Sub, and connect
@@ -94,26 +97,28 @@ waitForDone queue ourJc =
                 Right _ -> loop
      atomicallyIO loop
 
-requestPreload :: EventHandler -> Address Connect -> ZMQ z ByteString
+requestPreload :: (MonadIO m) => EventHandler m -> Address Connect -> ZMQT z m ByteString
 requestPreload k port =
   do s <- socket Req
      connectM s port
-     k RequestingPreload
+     lift $ k RequestingPreload
      send s [] ""
      receive s <*
-       k ReceivedPreload
+       lift (k ReceivedPreload)
 
-workLoop :: forall a b c d t t1 t2 z. (Serialize a, Serialize b, Serialize c, Serialize d,
+workLoop :: forall m a b c d t t1 t2 z.
+            (MonadIO m, MonadBaseControl IO m,
+             Serialize a, Serialize b, Serialize c, Serialize d,
              Receiver t, Sender t1, Sender t, Sender t2)
             => SlaveId
             -> JobCode
-            -> EventHandler
+            -> EventHandler m
             -> Socket z t
             -> Socket z t1
             -> Socket z t2
             -> a
-            -> (forall m. MonadIO m => WorkDetails a b c -> m d)
-            -> ZMQ z ()
+            -> (forall m. (MonadIO m) => WorkDetails m a b c -> m d)
+            -> ZMQT z m ()
 workLoop slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
   where loop c =
           do send workIn [] (encode jc)
@@ -128,10 +133,11 @@ workLoop slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
                     send workOut [] . reply $ (jc, wid, result)
                     sendDahoopLog (FinishedUnit wid)
                     loop (succ c)
-        sendDahoopLog e = k e >> send logOut [] (encode $ (slaveid, (DahoopEntry e :: SlaveLogEntry c)))
+        sendDahoopLog e = lift (k e) >> send logOut [] (encode $ (slaveid, (DahoopEntry e :: SlaveLogEntry c)))
         sendUserLog   e = send logOut [] (encode (slaveid, UserEntry e))
 
-monitorUntilStopped :: Socket z t -> (Maybe EventMsg -> ZMQ z a) -> ZMQ z (Async (Maybe EventMsg))
+monitorUntilStopped :: (MonadIO m, MonadBaseControl IO m, A.Forall (A.Pure m))
+                    => Socket z t -> (Maybe EventMsg -> ZMQT z m a) -> ZMQT z m (Async (Maybe EventMsg))
 monitorUntilStopped skt yield =
   do f <- monitor [AllEvents] skt
      async $
@@ -148,7 +154,8 @@ monitorUntilStopped skt yield =
 -- >>> twice $ runZMQ $ announcementsQueue 5 >>= \(v,_) ->  liftIO (cancel v >> print ())
 -- ()
 -- ()
-announcementsQueue :: Int -> ZMQ z (Async a, TChan ByteString)
+announcementsQueue :: (MonadIO m, MonadBaseControl IO m, A.Forall (A.Pure m))
+                   => Int -> ZMQT z m (Async a, TChan ByteString)
 announcementsQueue port =
   do queue <- liftIO newTChanIO
      v <- async $
