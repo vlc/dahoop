@@ -16,25 +16,31 @@ library
                   
     Dahoop.Utils
     Dahoop.ZMQ4
-
+    Dahoop.ZMQ4.Trans
+    
     Dahoop.Internal.Messages
     Dahoop.Internal.WorkQueue
 
   build-depends:
-                 base
-               , cereal
-               , containers
-               , bytestring
-               , async
-               , hslogger
-               , lens
-               , random
-               , semigroups
-               , stm
-               , transformers
-               , zeromq4-haskell
-               , uuid
-               , hostname
+                    base
+                , async
+                , bytestring
+                , cereal
+                , containers
+                , mtl
+                , monad-control
+                , exceptions >= 0.8.0.2
+                , hostname
+                , hslogger
+                , lens
+                , random
+                , semigroups
+                , stm
+                , transformers
+                , uuid
+                , zeromq4-haskell
+                , lifted-base            
+                , lifted-async
 
 executable example
   main-is:             Main.hs
@@ -46,5 +52,6 @@ executable example
               , random
               , cereal
               , transformers
+              , mtl
   default-language:    Haskell2010
   ghc-options: -threaded -rtsopts -O2

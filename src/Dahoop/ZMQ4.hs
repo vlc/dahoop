@@ -5,8 +5,9 @@ import           Data.List           (intercalate)
 import           Data.Monoid         ((<>))
 import           Data.Serialize      (Serialize)
 import           GHC.Generics        (Generic)
+import           Control.Monad.IO.Class
 import           System.ZMQ4         as Z (Socket, bind, connect, unbind, disconnect)
-import qualified System.ZMQ4.Monadic as M (Socket, ZMQ, bind, connect, unbind, disconnect)
+import qualified Dahoop.ZMQ4.Trans as M (Socket, ZMQT, bind, connect, unbind, disconnect)
 
 -- | An address that a 0mq socket can either bind or connect to, depending on the type of `a`.
 --
@@ -36,13 +37,13 @@ bind :: Socket a -> Address Bind -> IO ()
 bind skt = Z.bind skt . addressOf bindInterface
 
 -- | Bind a socket to a valid address, using the monadic API.
-bindM :: M.Socket z t -> Address Bind -> M.ZMQ z ()
+bindM :: (MonadIO m) => M.Socket z t -> Address Bind -> M.ZMQT z m ()
 bindM skt = M.bind skt . addressOf bindInterface
 
 unbind :: Socket a -> Address Bind -> IO ()
 unbind skt = Z.unbind skt . addressOf bindInterface
 
-unbindM :: M.Socket z t -> Address Bind -> M.ZMQ z ()
+unbindM :: (MonadIO m) => M.Socket z t -> Address Bind -> M.ZMQT z m ()
 unbindM skt = M.unbind skt . addressOf bindInterface
 
 -- | Connect a socket to a valid address.
@@ -50,13 +51,13 @@ connect :: Socket a -> Address Connect -> IO ()
 connect skt = Z.connect skt . addressOf connectInterface
 
 -- | Connect a socket to a valid address, using the monadic API.
-connectM :: M.Socket z t -> Address Connect -> M.ZMQ z ()
+connectM :: (MonadIO m) => M.Socket z t -> Address Connect -> M.ZMQT z m ()
 connectM skt = M.connect skt . addressOf connectInterface
 
 disconnect :: Socket a -> Address Connect -> IO ()
 disconnect skt = Z.disconnect skt . addressOf connectInterface
 
-disconnectM :: M.Socket z t -> Address Connect -> M.ZMQ z ()
+disconnectM :: (MonadIO m) => M.Socket z t -> Address Connect -> M.ZMQT z m ()
 disconnectM skt = M.disconnect skt . addressOf connectInterface
 
 -- Internal functions
