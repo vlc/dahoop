@@ -50,7 +50,7 @@ master =
 slave :: Int -> IO ()
 slave = S.runASlave k workerThread
   where workerThread :: forall m. (MonadIO m) => S.WorkDetails Float Float () -> m Float
-        workerThread (S.WorkDetails preload a logger) =
+        workerThread (S.WorkDetails preload a _) =
           do liftIO $ print a
              delay <- liftIO $ randomRIO (1,4)
              liftIO $ threadDelay (1000000 * delay)
