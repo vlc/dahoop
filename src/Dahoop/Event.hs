@@ -7,12 +7,12 @@ import GHC.Generics             (Generic)
 
 import Dahoop.Internal.Messages
 
-data MasterEvent c
+data MasterEvent c r
   = Announcing Announcement
   | Began JobCode
   | WaitingForWorkRequest
-  | SentWork WorkId
-  | ReceivedResult WorkId Float
+  | SentWork
+  | ReceivedResult r Float
   | SentTerminate
   | Finished
   | SentPreload
