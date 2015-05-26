@@ -96,8 +96,10 @@ preload :: (MonadIO m, Serialize a) => Int -> a -> TQueue (MasterEvent l r) -> Z
 preload port preloadData eventQueue = do
   s <- returning (socket Router) (`bindM` TCP Wildcard port)
   forever $ do
-    replyToReq s (encode preloadData)
-    atomicallyIO $ writeTQueue eventQueue SentPreload
+    (request, replyWith) <- replyarama s
+    let Right slaveid = decode request :: Either String M.SlaveId
+    atomicallyIO $ writeTQueue eventQueue (SentPreload slaveid)
+    replyWith (encode preloadData)
 
 broadcastFinished :: (MonadIO m) => M.JobCode -> [Address Connect] -> ZMQT z m ()
 broadcastFinished n ss =
@@ -125,7 +127,7 @@ dealWork port n workVar eventQueue =
                           (`bindM` TCP Wildcard port)
      let loop =
            do (request, replyWith) <- replyarama sendSkt
-              let Right slaveJc = decode request
+              let Right (slaveid, slaveJc) = decode request
               if slaveJc /= n then do
                 replyWith (M.terminate slaveJc)
                 loop
@@ -139,14 +141,17 @@ dealWork port n workVar eventQueue =
                     -- this would give time for recently received results to
                     -- get processed, and also give time for slightly slower slaves
                     -- to get their results in
-                    atomicallyIO $ writeTQueue eventQueue SentWork
+                    atomicallyIO $ writeTQueue eventQueue (SentWork slaveid)
                     (replyWith . M.work) (wid,thing) >> loop
                   Nothing ->
                     replyWith (M.terminate n)
      loop
-     forever (replyToReq sendSkt
-                         (M.terminate n) <*
-              atomicallyIO (writeTQueue eventQueue SentTerminate))
+
+     forever $ do
+       (request, replyWith) <- replyarama sendSkt
+       let Right (slaveid, _) = decode request :: Either String (M.SlaveId, M.JobCode)
+       atomicallyIO (writeTQueue eventQueue (SentTerminate slaveid))
+       replyWith (M.terminate n)
 
 receiveLogs :: forall z m l r. (MonadIO m, Serialize l, Serialize r) => Int -> TQueue (MasterEvent l r) -> ZMQT z m ()
 receiveLogs logPort eventQueue =
@@ -155,7 +160,7 @@ receiveLogs logPort eventQueue =
      subscribe logSocket "" -- Subscribe to every incoming message
      forever $
        do result <- receive logSocket
-          let Right (slaveid, logEntry) = decode result :: Either String (SlaveId, SlaveLogEntry l)
+          let Right (slaveid, logEntry) = decode result :: Either String (M.SlaveId, SlaveLogEntry l)
           atomicallyIO $ writeTQueue eventQueue (RemoteEvent slaveid logEntry)
      return ()
 
@@ -170,7 +175,7 @@ waitForAllResults k rp jc queue eventQueue workVar =
               let hasRecieved = elem In $ head events
               when hasRecieved $ do
                 result <- receive receiveSocket
-                let Right (slaveJc, wid, stuff) =
+                let Right (slaveid, slaveJc, wid, stuff) =
                       runGet M.getReply result
                 -- If a slave is sending work for the wrong job code,
                 -- it will be killed when it asks for the next bit of work
@@ -178,7 +183,7 @@ waitForAllResults k rp jc queue eventQueue workVar =
                   atomicallyIO $ do
                     complete wid queue
                     p <- progress queue
-                    writeTQueue eventQueue (ReceivedResult stuff p)
+                    writeTQueue eventQueue (ReceivedResult slaveid stuff p)
                   return ()
 
               let checkEvents = do

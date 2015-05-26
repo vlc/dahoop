@@ -17,7 +17,6 @@ import Control.Monad            (forever)
 import Control.Monad.Trans
 import Control.Monad.Trans.Control
 import qualified Control.Concurrent.Async.Lifted.Safe as A
-import Control.Monad.IO.Class   (MonadIO, liftIO)
 import Data.ByteString          (ByteString)
 import Data.Serialize           (Serialize, runGet, encode, decode)
 import Network.HostName
@@ -55,12 +54,13 @@ runASlave :: (MonadIO m, MonadBaseControl IO m, A.Forall (A.Pure m),
 runASlave k workFunction s =
   forever $ runZMQT (do (v,queue) <- announcementsQueue s
                         ann <- waitForAnnouncement k queue
-                        h   <- liftIO $ getHostName
-                        Right (preload :: c) <- decode <$> requestPreload k (ann ^. preloadAddress)
+                        h   <- liftIO getHostName
+                        let slaveid = SlaveId h s
+                        Right (preload :: c) <- decode <$> requestPreload slaveid k (ann ^. preloadAddress)
                         worker <- async (do workIn  <- returning (socket Req)  (`connectM` (ann ^. askAddress))
                                             workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
                                             logOut  <- returning (socket Pub)  (`connectM` (ann ^. loggingAddress))
-                                            workLoop (SlaveId h s) (ann ^. annJobCode) k workIn workOut logOut preload workFunction)
+                                            workLoop slaveid (ann ^. annJobCode) k workIn workOut logOut preload workFunction)
                         waiter <- async (liftIO . waitForDone queue $ ann ^. annJobCode)
                         liftIO $ do _ <- waitAnyCancel [worker,waiter,v]
                                     -- If we don't threadDelay here, STM exceptions happen when we loop
@@ -97,12 +97,12 @@ waitForDone queue ourJc =
                 Right _ -> loop
      atomicallyIO loop
 
-requestPreload :: (MonadIO m) => EventHandler m -> Address Connect -> ZMQT z m ByteString
-requestPreload k port =
+requestPreload :: (MonadIO m) => SlaveId -> EventHandler m -> Address Connect -> ZMQT z m ByteString
+requestPreload slaveid k port =
   do s <- socket Req
      connectM s port
      lift $ k RequestingPreload
-     send s [] ""
+     send s [] (encode slaveid)
      receive s <*
        lift (k ReceivedPreload)
 
@@ -121,7 +121,7 @@ workLoop :: forall m a b c d t t1 t2 z.
             -> ZMQT z m ()
 workLoop slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
   where loop c =
-          do send workIn [] (encode jc)
+          do send workIn [] $ encode (slaveid, jc)
              sendDahoopLog WaitingForWorkReply
              input <- waitRead workIn >> receive workIn
              let Right n = runGet getWorkOrTerminate input -- HAHA, parsing never fails
@@ -130,7 +130,7 @@ workLoop slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
                Right (wid, payload) ->
                  do sendDahoopLog (StartedUnit wid)
                     result <- f (WorkDetails preload payload sendUserLog)
-                    send workOut [] . reply $ (jc, wid, result)
+                    send workOut [] . reply $ (slaveid, jc, wid, result)
                     sendDahoopLog (FinishedUnit wid)
                     loop (succ c)
         sendDahoopLog e = lift (k e) >> send logOut [] (encode $ (slaveid, (DahoopEntry e :: SlaveLogEntry c)))

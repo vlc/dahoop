@@ -42,11 +42,11 @@ master =
                E.Announcing ann         -> liftIO $ putStrLn $ "Announcing " ++ show ann
                E.Began n                -> liftIO $ putStrLn $ "Job #" ++ show n
                E.WaitingForWorkRequest  -> liftIO $ putStrLn "Waiting for slave"
-               E.SentWork               -> liftIO $ putStrLn "Sent work"
-               E.ReceivedResult r _     -> saveFunc r
-               E.SentTerminate          -> return ()
+               E.SentWork sid           -> liftIO $ putStrLn $ "Sent work to: " ++ show sid
+               E.ReceivedResult _ r _   -> saveFunc r
+               E.SentTerminate _        -> return ()
                E.Finished               -> liftIO $ putStrLn "Finished"
-               E.SentPreload            -> liftIO $ putStrLn "Sent preload"
+               E.SentPreload sid        -> liftIO $ putStrLn $ "Sent preload to: " ++ show sid
                E.RemoteEvent slaveid se -> liftIO $ print (slaveid, se)
     in runReaderT (M.runAMaster k config preloadData work) secret
 
