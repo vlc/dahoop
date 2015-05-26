@@ -15,6 +15,7 @@ import Data.Int
 import Data.List.NonEmpty (NonEmpty)
 import Data.Restricted
 import Data.Word
+import qualified Data.ByteString.Lazy as Lazy (ByteString)
 import Data.ByteString (ByteString)
 import System.Posix.Types (Fd)
 
@@ -90,9 +91,6 @@ runZMQT z = (liftBaseOp (E.bracket make term)) (runReaderT (_unzmqt z))
   where
     make = ZMQEnv <$> newIORef 1 <*> Z.context <*> newIORef []
 
--- newtype ZMQT z m a = ZMQT { _unzmqt :: ReaderT ZMQEnv m a }
--- type ZMQ z a = ZMQT z IO a
-
 liftZMQ :: (MonadIO m) => ZMQ z a -> ZMQT z m a
 liftZMQ = ZMQT . mapReaderT liftIO . _unzmqt
 
@@ -161,8 +159,8 @@ disconnect s = liftIO . Z.disconnect (_unsocket s)
 send :: (MonadIO m, Z.Sender t) => Socket z t -> [Z.Flag] -> ByteString -> ZMQT z m ()
 send s f = liftIO . Z.send (_unsocket s) f
 
--- send' :: Z.Sender t => Socket z t -> [Z.Flag] -> Lazy.ByteString -> ZMQT z m ()
--- send' s f = liftIO . Z.send' (_unsocket s) f
+send' :: (MonadIO m, Z.Sender t) => Socket z t -> [Z.Flag] -> Lazy.ByteString -> ZMQT z m ()
+send' s f = liftIO . Z.send' (_unsocket s) f
 
 sendMulti :: (MonadIO m, Z.Sender t) => Socket z t -> NonEmpty ByteString -> ZMQT z m ()
 sendMulti s = liftIO . Z.sendMulti (_unsocket s)
