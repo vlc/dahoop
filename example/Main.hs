@@ -6,7 +6,6 @@ module Main where
 
 import Control.Monad.Reader
 import Control.Concurrent     (threadDelay)
-import Control.Monad.IO.Class (MonadIO, liftIO)
 import System.Environment     (getArgs)
 import System.Exit            (exitFailure)
 import System.Random          (randomRIO)
@@ -38,18 +37,18 @@ master =
         saveFunc f = do
                        s <- ask
                        lift (putStrLn $ "The result was " ++ show (f::Float) ++ " and the secret is " ++ s)
-      in runReaderT (M.runAMaster k config preloadData work saveFunc) secret
-  where k :: M.EventHandler (ReaderT String IO) String
-        k e = liftIO $ case e of
-                        E.Announcing ann -> putStrLn $ "Announcing " ++ show ann
-                        E.Began n -> putStrLn $ "Job #" ++ show n
-                        E.WaitingForWorkRequest -> putStrLn "Waiting for slave"
-                        E.SentWork a -> putStrLn $ "Sent work " ++ show a
-                        E.ReceivedResult a _ -> putStrLn $ "Received result " ++ show a
-                        E.SentTerminate -> return ()
-                        E.Finished -> putStrLn "Finished"
-                        E.SentPreload -> putStrLn "Sent preload"
-                        E.RemoteEvent slaveid e -> print (slaveid, e)
+        k :: M.EventHandler (ReaderT String IO) String Float
+        k e = case e of
+               E.Announcing ann         -> liftIO $ putStrLn $ "Announcing " ++ show ann
+               E.Began n                -> liftIO $ putStrLn $ "Job #" ++ show n
+               E.WaitingForWorkRequest  -> liftIO $ putStrLn "Waiting for slave"
+               E.SentWork               -> liftIO $ putStrLn "Sent work"
+               E.ReceivedResult r _     -> saveFunc r
+               E.SentTerminate          -> return ()
+               E.Finished               -> liftIO $ putStrLn "Finished"
+               E.SentPreload            -> liftIO $ putStrLn "Sent preload"
+               E.RemoteEvent slaveid se -> liftIO $ print (slaveid, se)
+    in runReaderT (M.runAMaster k config preloadData work) secret
 
 -- SLAVE
 slave :: Int -> IO ()
