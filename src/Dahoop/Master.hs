@@ -23,7 +23,7 @@ import Data.ByteString          (ByteString)
 import Data.List.NonEmpty       (NonEmpty ((:|)))
 import Data.Serialize           (runGet, encode, decode, Serialize)
 
-import System.ZMQ4.Monadic      (Pub (..), Pull (..), Sub (..), Receiver, Router (..), Sender)
+import System.ZMQ4.Monadic      (Pub (..), Pull (..), Sub (..), Receiver, Router (..), Sender, Poll (Sock), Event (In), poll)
 import Dahoop.ZMQ4.Trans        (ZMQT, Socket, receive, receiveMulti, runZMQT, liftZMQ, send, sendMulti, socket, subscribe, async)
 
 import qualified Dahoop.Internal.Messages  as M
@@ -51,10 +51,10 @@ makeLenses ''DistConfig
 
 runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l,
                MonadIO m, MonadBaseControl IO m) =>
-              EventHandler m l r -> DistConfig -> a -> [IO b] -> m ()
+              EventHandler m l r -> DistConfig -> a -> [m b] -> m ()
 runAMaster k config preloadData work =
         runZMQT $ do jobCode <- liftIO M.generateJobCode
-                     eventQueue <- atomicallyIO $ newTQueue
+                     eventQueue <- atomicallyIO newTQueue
                      announceThread <- liftZMQ $ async (announce (announcement config jobCode) (config ^. slaves) eventQueue)
                      -- liftIO . link $ announceThread
                      (liftIO . link) =<< liftZMQ (async (preload (config ^. preloadPort) preloadData eventQueue))
@@ -97,7 +97,7 @@ preload port preloadData eventQueue = do
   s <- returning (socket Router) (`bindM` TCP Wildcard port)
   forever $ do
     replyToReq s (encode preloadData)
-    atomicallyIO $ writeTQueue eventQueue (SentPreload)
+    atomicallyIO $ writeTQueue eventQueue SentPreload
 
 broadcastFinished :: (MonadIO m) => M.JobCode -> [Address Connect] -> ZMQT z m ()
 broadcastFinished n ss =
@@ -109,45 +109,44 @@ broadcastFinished n ss =
 
 -- NOTE: Send and receive must be done using different sockets, as they are used in different threads
 theProcess' :: forall m a l r z. (MonadIO m, MonadBaseControl IO m, Serialize a, Serialize l, Serialize r)
-            => EventHandler m l r -> Int -> M.JobCode -> Int -> Int -> [IO a] -> TQueue (MasterEvent l r) -> ZMQT z m ()
+            => EventHandler m l r -> Int -> M.JobCode -> Int -> Int -> [m a] -> TQueue (MasterEvent l r) -> ZMQT z m ()
 theProcess' k sendPort jc rport logPort work eventQueue = do
   workQueue <- atomicallyIO $ buildWork work
+  workVar   <- atomicallyIO newEmptyTMVar
   liftZMQ $ do
-    (liftIO . link) =<< async (dealWork sendPort jc workQueue eventQueue)
+    (liftIO . link) =<< async (dealWork sendPort jc workVar eventQueue)
     (liftIO . link) =<< async (receiveLogs logPort eventQueue)
 
-  waitForAllResults k rport jc workQueue eventQueue
+  waitForAllResults k rport jc workQueue eventQueue workVar
 
-dealWork :: (MonadIO m, Serialize a) => Int -> M.JobCode -> Work (m a) -> TQueue (MasterEvent l r) -> ZMQT s m ()
-dealWork port n workQueue eventQueue =
+dealWork :: (MonadIO m, Serialize a) => Int -> M.JobCode -> TMVar (Maybe (WorkId, a)) -> TQueue (MasterEvent l r) -> ZMQT s m ()
+dealWork port n workVar eventQueue =
   do sendSkt <- returning (socket Router)
                           (`bindM` TCP Wildcard port)
      let loop =
            do (request, replyWith) <- replyarama sendSkt
               let Right slaveJc = decode request
-              if (slaveJc /= n) then do
+              if slaveJc /= n then do
                 replyWith (M.terminate slaveJc)
                 loop
               else do
-                item <- (atomicallyIO . start) workQueue
+                item <- atomicallyIO $ takeTMVar workVar
                 case item of
-                  Just (wid, Repeats _, builder) -> do
+                  Just (wid, thing) -> do
                     -- if we've just started repeating, we could return
                     -- the item to the queue (unGetTQueue), tell the client to hold tight
                     -- for a little while, sleep for a bit, then loop.
                     -- this would give time for recently received results to
                     -- get processed, and also give time for slightly slower slaves
                     -- to get their results in
-                    thing <- lift builder
-                    atomicallyIO $ writeTQueue eventQueue (SentWork)
-
+                    atomicallyIO $ writeTQueue eventQueue SentWork
                     (replyWith . M.work) (wid,thing) >> loop
                   Nothing ->
                     replyWith (M.terminate n)
      loop
      forever (replyToReq sendSkt
                          (M.terminate n) <*
-              (atomicallyIO $ writeTQueue eventQueue (SentTerminate)))
+              atomicallyIO (writeTQueue eventQueue SentTerminate))
 
 receiveLogs :: forall z m l r. (MonadIO m, Serialize l, Serialize r) => Int -> TQueue (MasterEvent l r) -> ZMQT z m ()
 receiveLogs logPort eventQueue =
@@ -160,32 +159,46 @@ receiveLogs logPort eventQueue =
           atomicallyIO $ writeTQueue eventQueue (RemoteEvent slaveid logEntry)
      return ()
 
-waitForAllResults :: (MonadIO m, Serialize r) => EventHandler m l r -> Int -> M.JobCode -> Work a2 -> TQueue (MasterEvent l r) -> ZMQT z m ()
-waitForAllResults k rp jc queue eventQueue =
+waitForAllResults :: (MonadIO m, Serialize r)
+                  => EventHandler m l r -> Int -> M.JobCode -> Work (m a) -> TQueue (MasterEvent l r) -> TMVar (Maybe (WorkId, a)) -> ZMQT z m ()
+waitForAllResults k rp jc queue eventQueue workVar =
   do receiveSocket <- returning (socket Pull)
                                 (`bindM` TCP Wildcard rp)
      let loop =
-           do result <- receive receiveSocket
-              let Right (slaveJc, wid, stuff) =
-                    runGet M.getReply result
-              -- If a slave is sending work for the wrong job code,
-              -- it will be killed when it asks for the next bit of work
-              when (jc == slaveJc) $ do
-                atomicallyIO $ do
-                  complete wid queue
-                  p <- progress queue
-                  writeTQueue eventQueue (ReceivedResult stuff p)
-                return ()
+           do let recievedPoll = Sock receiveSocket [In] Nothing
+              events <- poll 0 [recievedPoll]
+              let hasRecieved = elem In $ head events
+              when hasRecieved $ do
+                result <- receive receiveSocket
+                let Right (slaveJc, wid, stuff) =
+                      runGet M.getReply result
+                -- If a slave is sending work for the wrong job code,
+                -- it will be killed when it asks for the next bit of work
+                when (jc == slaveJc) $ do
+                  atomicallyIO $ do
+                    complete wid queue
+                    p <- progress queue
+                    writeTQueue eventQueue (ReceivedResult stuff p)
+                  return ()
 
               let checkEvents = do
                     event <- atomicallyIO $ tryReadTQueue eventQueue
                     case event of
                       Just e -> lift (k e) >> checkEvents
                       Nothing -> return ()
-
               checkEvents
 
               completed <- atomicallyIO $ isComplete queue
+
+              if completed then
+                atomicallyIO $ do
+                  tryTakeTMVar workVar
+                  putTMVar workVar Nothing
+              else do
+                Just (wid, Repeats _, action) <- atomicallyIO $ start queue
+                work <- lift action
+                atomicallyIO $ putTMVar workVar $ Just (wid, work)
+
               unless completed loop
      loop
      return ()
