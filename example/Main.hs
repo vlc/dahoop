@@ -59,7 +59,7 @@ slave = S.runASlave k workerThread
              delay <- liftIO $ randomRIO (1,4)
              liftIO $ threadDelay (1000000 * delay)
              return (log a + preload)
-        k :: S.EventHandler IO
+        k :: S.EventHandler
         k e = liftIO $ case e of
             E.AwaitingAnnouncement -> putStrLn "Waiting for job"
             E.ReceivedAnnouncement a -> putStrLn $ "Received " ++ show a

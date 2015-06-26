@@ -8,7 +8,6 @@ import Control.Concurrent.Async (Async)
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Trans.Reader
-import Control.Monad.Trans.Control
 import Control.Monad.Catch
 import Data.Int
 
@@ -19,9 +18,8 @@ import qualified Data.ByteString.Lazy as Lazy (ByteString)
 import Data.ByteString (ByteString)
 import System.Posix.Types (Fd)
 
-import qualified Control.Concurrent.Async.Lifted.Safe as A
-import qualified Control.Exception.Lifted as E
-import           Data.IORef.Lifted
+import qualified Control.Concurrent.Async as A
+import           Data.IORef
 import qualified Control.Monad.Catch      as C
 import qualified System.ZMQ4              as Z
 import qualified System.ZMQ4.Internal     as I
@@ -63,16 +61,16 @@ instance MonadThrow m => MonadThrow (ZMQT z m) where
 instance MonadCatch m => MonadCatch (ZMQT z m) where
     catch (ZMQT m) f = ZMQT $ m `C.catch` (_unzmqt . f)
 
--- instance (MonadIO m) => MonadMask (ZMQT z m) where
---     mask a = ZMQT . ReaderT $ \env ->
---         C.mask $ \restore ->
---             let f (ZMQT (ReaderT b)) = ZMQT $ ReaderT (restore . b)
---             in runReaderT (_unzmqt (a $ f)) env
+instance (MonadMask m) => MonadMask (ZMQT z m) where
+    mask a = ZMQT . ReaderT $ \env ->
+        C.mask $ \restore ->
+            let f (ZMQT (ReaderT b)) = ZMQT $ ReaderT (restore . b)
+            in runReaderT (_unzmqt (a $ f)) env
 
---     uninterruptibleMask a = ZMQT . ReaderT $ \env ->
---         C.uninterruptibleMask $ \restore ->
---             let f (ZMQT (ReaderT b)) = ZMQT $ ReaderT (restore . b)
---             in runReaderT (_unzmqt (a $ f)) env
+    uninterruptibleMask a = ZMQT . ReaderT $ \env ->
+        C.uninterruptibleMask $ \restore ->
+            let f (ZMQT (ReaderT b)) = ZMQT $ ReaderT (restore . b)
+            in runReaderT (_unzmqt (a $ f)) env
 
 instance (Monad m) => Functor (ZMQT z m) where
     fmap = liftM
@@ -86,10 +84,13 @@ instance (Monad m) => Applicative (ZMQT z m) where
 -- An invocation of 'runZMQ' will internally create a 'System.ZMQ4.Context'
 -- and all actions are executed relative to this context. On finish the
 -- context will be disposed, but see 'async'.
-runZMQT :: (MonadIO m, MonadBaseControl IO m) => (forall z. ZMQT z m a) -> m a
-runZMQT z = (liftBaseOp (E.bracket make term)) (runReaderT (_unzmqt z))
+runZMQT :: (MonadIO m, MonadMask m) => (forall z. ZMQT z m a) -> m a
+runZMQT z = bracket make term (runReaderT (_unzmqt z))
   where
-    make = ZMQEnv <$> newIORef 1 <*> Z.context <*> newIORef []
+    make = liftIO $ ZMQEnv <$> newIORef 1 <*> Z.context <*> newIORef []
+
+runZMQ :: (forall z. ZMQ z a) -> IO a
+runZMQ = runZMQT
 
 liftZMQ :: (MonadIO m) => ZMQ z a -> ZMQT z m a
 liftZMQ = ZMQT . mapReaderT liftIO . _unzmqt
@@ -110,11 +111,11 @@ liftZMQ = ZMQT . mapReaderT liftIO . _unzmqt
 -- Here, 'runZMQ' will finish before the code section in 'async', but due to
 -- reference counting, the 'System.ZMQ4.Context' will only be disposed after
 -- 'async' finishes as well.
-async :: (MonadIO m, MonadBaseControl IO m, A.Forall (A.Pure m)) => ZMQT z m a -> ZMQT z m (Async a)
+async :: ZMQ z a -> ZMQ z (Async a)
 async z = ZMQT $ do
     e <- ask
-    atomicModifyIORef (_refcount e) $ \n -> (succ n, ())
-    lift $ A.async $ (runReaderT (_unzmqt z) e) `E.finally` (liftIO . term) e
+    lift $ atomicModifyIORef (_refcount e) $ \n -> (succ n, ())
+    lift $ A.async $ (runReaderT (_unzmqt z) e) `finally` term e
 
 ioThreads :: (MonadIO m) => ZMQT z m Word
 ioThreads = onContext Z.ioThreads
@@ -432,11 +433,11 @@ waitWrite = liftIO . Z.waitWrite . _unsocket
 onContext :: (MonadIO m) => (Z.Context -> IO a) -> ZMQT z m a
 onContext f = ZMQT $! asks _context >>= liftIO . f
 
-term :: ZMQEnv -> IO ()
-term env = do
+term :: (MonadIO m) => ZMQEnv -> m ()
+term env = liftIO $ do
     n <- atomicModifyIORef (_refcount env) $ \n -> (pred n, n)
     when (n == 1) $ do
         readIORef (_sockets env) >>= mapM_ close'
         Z.term (_context env)
   where
-    close' s = I.closeSock s `E.catch` (\e -> print (e :: E.SomeException))
+    close' s = I.closeSock s `catch` (\e -> print (e :: SomeException))

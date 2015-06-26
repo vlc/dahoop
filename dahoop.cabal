@@ -39,8 +39,6 @@ library
                 , transformers
                 , uuid
                 , zeromq4-haskell
-                , lifted-base            
-                , lifted-async
 
 executable example
   main-is:             Main.hs

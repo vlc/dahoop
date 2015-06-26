@@ -17,7 +17,7 @@ import Control.Lens             (makeLenses, (^.))
 import Control.Monad            (forever, unless, when)
 import Control.Monad.IO.Class
 import Control.Monad.Trans
-import Control.Monad.Trans.Control
+import Control.Monad.Catch
 import Control.Concurrent.STM
 import Data.ByteString          (ByteString)
 import Data.List.NonEmpty       (NonEmpty ((:|)))
@@ -50,7 +50,7 @@ data DistConfig = DistConfig {
 makeLenses ''DistConfig
 
 runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l,
-               MonadIO m, MonadBaseControl IO m) =>
+               MonadIO m, MonadMask m) =>
               EventHandler m l r -> DistConfig -> a -> [m b] -> m ()
 runAMaster k config preloadData work =
         runZMQT $ do jobCode <- liftIO M.generateJobCode
@@ -110,7 +110,7 @@ broadcastFinished n ss =
 
 
 -- NOTE: Send and receive must be done using different sockets, as they are used in different threads
-theProcess' :: forall m a l r z. (MonadIO m, MonadBaseControl IO m, Serialize a, Serialize l, Serialize r)
+theProcess' :: forall m a l r z. (MonadIO m, MonadMask m, Serialize a, Serialize l, Serialize r)
             => EventHandler m l r -> Int -> M.JobCode -> Int -> Int -> [m a] -> TQueue (MasterEvent l r) -> ZMQT z m ()
 theProcess' k sendPort jc rport logPort work eventQueue = do
   workQueue <- atomicallyIO $ buildWork work
