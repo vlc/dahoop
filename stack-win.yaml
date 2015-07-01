@@ -1,0 +1,10 @@
+extra-deps: []
+resolver: lts-2.16
+arch: x86_64
+flags: {}
+packages:
+- '.'
+extra-include-dirs:
+  - c:/msys64/mingw64/include
+extra-lib-dirs:
+  - c:/msys64/mingw64/lib

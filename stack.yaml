@@ -1,0 +1,6 @@
+extra-deps: []
+resolver: lts-2.16
+arch: x86_64
+flags: {}
+packages:
+- '.'
