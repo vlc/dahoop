@@ -6,6 +6,8 @@ if (!$msys) {throw "MSYS environment variable not set"}
 
 $mingw_dir = "$msys\mingw64"
 
+$env:Path += ";$mingw_dir\bin"
+
 $packages = @("mingw-w64-x86_64-zeromq")
 
 # ----------------
