@@ -25,6 +25,7 @@ $packages |`
 
 ####
 echo "Building with Stack"
+& stack path
 & stack build --extra-include-dirs=$msys/mingw64/include --extra-lib-dirs=$msys/mingw64/lib
 if (!$?) { throw "Build failed" }
 & stack test --extra-include-dirs=$msys/mingw64/include --extra-lib-dirs=$msys/mingw64/lib
