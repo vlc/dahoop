@@ -8,6 +8,8 @@ $mingw_dir = "$msys\mingw64"
 
 $env:Path += ";$mingw_dir\bin"
 
+echo $env:Path
+
 $packages = @("mingw-w64-x86_64-zeromq")
 
 # ----------------
