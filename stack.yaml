@@ -1,6 +1,6 @@
 extra-deps: []
-resolver: lts-2.16
 arch: x86_64
+resolver: nightly-2015-06-30
 flags: {}
 packages:
 - '.'
