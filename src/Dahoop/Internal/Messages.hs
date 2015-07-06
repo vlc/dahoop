@@ -8,7 +8,6 @@ module Dahoop.Internal.Messages
         getAnnouncementOrFinishUp, WorkId, loggingAddress, SlaveId(..))
        where
 
-import Control.Applicative ((<$>), (<*>))
 import Control.Lens        (makeLenses)
 import Data.ByteString     (ByteString)
 import Data.Serialize      (Get, Serialize, encode, get, getWord32be, put, putWord32be, runPut)

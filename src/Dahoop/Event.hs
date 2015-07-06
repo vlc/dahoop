@@ -32,3 +32,11 @@ instance Serialize SlaveEvent
 data SlaveLogEntry a = DahoopEntry SlaveEvent | UserEntry a deriving (Eq, Show, Generic)
 
 instance (Serialize a) => Serialize (SlaveLogEntry a)
+
+type MasterEventHandler m l r = MasterEvent l r -> m ()
+
+type SlaveEventHandler = SlaveEvent -> IO ()
+
+data WorkDetails m a b c = WorkDetails { workPreload :: a,
+                                         workPayload :: b,
+                                         remoteLogger :: c -> m () }

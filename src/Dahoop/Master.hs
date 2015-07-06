@@ -36,8 +36,6 @@ import           Dahoop.ZMQ4
 -- * A heartbeat?
 -- * UUID for job codes
 
-type EventHandler m l r = MasterEvent l r -> m ()
-
 -- MASTER
 
 data DistConfig = DistConfig {
@@ -51,7 +49,7 @@ makeLenses ''DistConfig
 
 runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l,
                MonadIO m, MonadMask m) =>
-              EventHandler m l r -> DistConfig -> a -> [m b] -> m ()
+              MasterEventHandler m l r -> DistConfig -> a -> [m b] -> m ()
 runAMaster k config preloadData work =
         runZMQT $ do jobCode <- liftIO M.generateJobCode
                      eventQueue <- atomicallyIO newTQueue
@@ -111,7 +109,7 @@ broadcastFinished n ss =
 
 -- NOTE: Send and receive must be done using different sockets, as they are used in different threads
 theProcess' :: forall m a l r z. (MonadIO m, MonadMask m, Serialize a, Serialize l, Serialize r)
-            => EventHandler m l r -> Int -> M.JobCode -> Int -> Int -> [m a] -> TQueue (MasterEvent l r) -> ZMQT z m ()
+            => MasterEventHandler m l r -> Int -> M.JobCode -> Int -> Int -> [m a] -> TQueue (MasterEvent l r) -> ZMQT z m ()
 theProcess' k sendPort jc rport logPort work eventQueue = do
   workQueue <- atomicallyIO $ buildWork work
   workVar   <- atomicallyIO newEmptyTMVar
@@ -165,7 +163,7 @@ receiveLogs logPort eventQueue =
      return ()
 
 waitForAllResults :: (MonadIO m, Serialize r)
-                  => EventHandler m l r -> Int -> M.JobCode -> Work (m a) -> TQueue (MasterEvent l r) -> TMVar (Maybe (WorkId, a)) -> ZMQT z m ()
+                  => MasterEventHandler m l r -> Int -> M.JobCode -> Work (m a) -> TQueue (MasterEvent l r) -> TMVar (Maybe (WorkId, a)) -> ZMQT z m ()
 waitForAllResults k rp jc queue eventQueue workVar =
   do receiveSocket <- returning (socket Pull)
                                 (`bindM` TCP Wildcard rp)

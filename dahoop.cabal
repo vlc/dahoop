@@ -12,6 +12,7 @@ library
   exposed-modules:
     Dahoop.Master
     Dahoop.Slave
+    Dahoop.Single
     Dahoop.Event
                   
     Dahoop.Utils
