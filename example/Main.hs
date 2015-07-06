@@ -11,9 +11,8 @@ import System.Environment     (getArgs)
 import System.Exit            (exitFailure)
 import System.Random          (randomRIO)
 
+import Dahoop
 import qualified Dahoop.Master as M
-import qualified Dahoop.Slave  as S
-import qualified Dahoop.Single as SS
 import qualified Dahoop.Event  as E
 
 import Dahoop.ZMQ4
@@ -21,11 +20,18 @@ import Dahoop.ZMQ4
 main :: IO ()
 main =
   do v <- getArgs
-     case v of
-       ["master"] -> master
+     let floats = [(1.0 :: Float)..3.0]
+         work = map return floats
+         preload = 1.1
+         secret = "BOO!"
+     let (master, slave, single) = dahoop masterHandler slaveHandler preload work workerThread
+     flip runReaderT secret $ case v of
+       ["master"] -> let config = M.DistConfig 4001 4000 4002 4003 (IP4' 127 0 0 1) someSlaves
+                         someSlaves = map f [5000, 5001] where f = TCP (IP4' 127 0 0 1)
+                     in master config
        ["slave",ss] -> slave (read ss)
        ["single"] -> single
-       _ ->
+       _ -> liftIO $
          do putStrLn "USAGE: $0 [slave PORT | master]"
             exitFailure
 
@@ -63,27 +69,3 @@ workerThread (E.WorkDetails preload a _) =
      delay <- liftIO $ randomRIO (1,4)
      liftIO $ threadDelay (1000000 * delay)
      return (log a + preload)
-
-master :: IO ()
-master =
-    let config = M.DistConfig 4001 4000 4002 4003 (IP4' 127 0 0 1) someSlaves
-        someSlaves = map f [5000, 5001] where f = TCP (IP4' 127 0 0 1)
-        secret = "BOO!"
-        floats = [(1.0 :: Float)..3.0]
-        work = map return floats
-        preloadData = 1.1 :: Float
-
-    in runReaderT (M.runAMaster masterHandler config preloadData work) secret
-
--- SLAVE
-slave :: Int -> IO ()
-slave = S.runASlave slaveHandler workerThread
-
-single :: IO ()
-single =
-    let secret = "BOO!"
-        floats = [(1.0 :: Float)..3.0]
-        work = map return floats
-        preloadData = 1.1 :: Float
-
-    in runReaderT (SS.runASingle masterHandler slaveHandler preloadData work workerThread) secret
