@@ -1,6 +1,9 @@
 {-# LANGUAGE RankNTypes                #-}
 module Dahoop (
   dahoop,
+  Dahoop.Master.runAMaster,
+  Dahoop.Slave.runASlave,
+  Dahoop.Single.runASingle,
   module Dahoop.Event,
   Dahoop.Master.DistConfig(..),
   Dahoop.ZMQ4.Address(..),
