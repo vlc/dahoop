@@ -1,5 +1,12 @@
 {-# LANGUAGE RankNTypes                #-}
-module Dahoop where
+module Dahoop (
+  dahoop,
+  module Dahoop.Event,
+  Dahoop.Master.DistConfig(..),
+  Dahoop.ZMQ4.Address(..),
+  Dahoop.ZMQ4.Connect(..),
+  Dahoop.ZMQ4.Bind(..),
+) where
 
 import Control.Monad.IO.Class
 import Control.Monad.Catch
@@ -9,6 +16,7 @@ import Dahoop.Event
 import Dahoop.Slave
 import Dahoop.Master
 import Dahoop.Single
+import Dahoop.ZMQ4
 
 dahoop :: (Serialize a, Serialize b, Serialize c, Serialize r, MonadIO m, MonadMask m)
           => MasterEventHandler m c r
