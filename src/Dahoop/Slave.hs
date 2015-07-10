@@ -8,7 +8,7 @@
 {-# LANGUAGE ScopedTypeVariables       #-}
 module Dahoop.Slave where
 
-import Control.Applicative      ((<$>), (<*))
+
 import Control.Concurrent       (threadDelay)
 import Control.Concurrent.Async hiding (async)
 import Control.Concurrent.STM

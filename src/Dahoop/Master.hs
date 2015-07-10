@@ -10,7 +10,7 @@ module Dahoop.Master (
   module Dahoop.Master
 ) where
 
-import Control.Applicative      ((<*))
+
 import Control.Concurrent       (threadDelay)
 import Control.Concurrent.Async (cancel, link)
 import Control.Lens             (makeLenses, (^.))
