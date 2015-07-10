@@ -41,6 +41,7 @@ library
                 , transformers
                 , uuid
                 , zeromq4-haskell
+                , foldl
 
 executable example
   main-is:             Main.hs
