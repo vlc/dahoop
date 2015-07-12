@@ -10,8 +10,10 @@ library
   ghc-options: -threaded -rtsopts -O2
   default-language:    Haskell2010
   exposed-modules:
+    Dahoop
     Dahoop.Master
     Dahoop.Slave
+    Dahoop.Single
     Dahoop.Event
                   
     Dahoop.Utils

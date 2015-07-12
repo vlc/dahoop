@@ -1,6 +1,7 @@
 {-# LANGUAGE RankNTypes                         #-}
 {-# LANGUAGE FlexibleContexts                   #-}
 {-# LANGUAGE ConstraintKinds                    #-}
+{-# OPTIONS_GHC -fno-warn-deprecations #-}
 module Dahoop.ZMQ4.Trans where
 
 

@@ -41,14 +41,8 @@ import Dahoop.ZMQ4
 -- any async tasks that are expected to run forever (in the context of a job) need to be
 -- explicitly cancelled
 
-type EventHandler = SlaveEvent -> IO ()
-
-data WorkDetails m a b c = WorkDetails { preload :: a,
-                                         payload :: b,
-                                         remoteLogger :: c -> m () }
-
 runASlave :: (Serialize a, Serialize b, Serialize c, Serialize d)
-          => EventHandler -> (forall m. (MonadIO m) => WorkDetails m a b c -> m d) -> Int -> IO ()
+          => SlaveEventHandler -> (forall m. (MonadIO m) => WorkDetails m a b c -> m d) -> Int -> IO ()
 runASlave k workFunction s =
   forever $ runZMQ (do (v,queue) <- announcementsQueue s
                        ann <- waitForAnnouncement k queue
@@ -68,7 +62,7 @@ runASlave k workFunction s =
                                    threadDelay 500000
                        return ())
 
-waitForAnnouncement :: (MonadIO m) => EventHandler -> TChan ByteString -> ZMQT z m Announcement
+waitForAnnouncement :: (MonadIO m) => SlaveEventHandler -> TChan ByteString -> ZMQT z m Announcement
 waitForAnnouncement k queue =
   do liftIO $ k AwaitingAnnouncement
      ann <- atomicallyIO loop
@@ -95,7 +89,7 @@ waitForDone queue ourJc =
                 Right _ -> loop
      atomicallyIO loop
 
-requestPreload :: (MonadIO m) => SlaveId -> EventHandler -> Address Connect -> ZMQT z m ByteString
+requestPreload :: (MonadIO m) => SlaveId -> SlaveEventHandler -> Address Connect -> ZMQT z m ByteString
 requestPreload slaveid k port =
   do s <- socket Req
      connectM s port
@@ -110,7 +104,7 @@ workLoop :: forall m a b c d t t1 t2 z.
              Receiver t, Sender t1, Sender t, Sender t2)
             => SlaveId
             -> JobCode
-            -> EventHandler
+            -> SlaveEventHandler
             -> Socket z t
             -> Socket z t1
             -> Socket z t2
