@@ -109,7 +109,7 @@ workLoop :: forall m a b c d t t1 t2 z.
             -> Socket z t1
             -> Socket z t2
             -> a
-            -> (forall m. (MonadIO m) => WorkDetails m a b c -> m d)
+            -> (forall n. (MonadIO n) => WorkDetails n a b c -> n d)
             -> ZMQT z m ()
 workLoop slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
   where loop c =

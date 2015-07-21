@@ -13,7 +13,7 @@ runASingle :: (MonadIO m)
            -> SlaveEventHandler
            -> a
            -> [m b]
-           -> (forall m. (MonadIO m) => WorkDetails m a b c -> m r)
+           -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
            -> m ()
 runASingle mk sk preload workBuilders workFunction = do
   jobCode <- liftIO M.generateJobCode

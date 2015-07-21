@@ -26,11 +26,11 @@ dahoop :: (Serialize a, Serialize b, Serialize c, Serialize r, MonadIO m, MonadM
           -> SlaveEventHandler
           -> a
           -> [m b]
-          -> (forall m. (MonadIO m) => WorkDetails m a b c -> m r)
+          -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
           -> (DistConfig -> m (),
               Int -> m (),
               m ())
-dahoop mk sk preload workBuilders workFunction =
-  (\distConfig -> runAMaster mk distConfig preload workBuilders,
+dahoop mk sk pre workBuilders workFunction =
+  (\distConfig -> runAMaster mk distConfig pre workBuilders,
    \port -> liftIO $ runASlave sk workFunction port,
-   runASingle mk sk preload workBuilders workFunction)
+   runASingle mk sk pre workBuilders workFunction)
