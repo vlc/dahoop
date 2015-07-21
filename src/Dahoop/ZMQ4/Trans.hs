@@ -1,9 +1,10 @@
 {-# LANGUAGE RankNTypes                         #-}
 {-# LANGUAGE FlexibleContexts                   #-}
 {-# LANGUAGE ConstraintKinds                    #-}
+{-# OPTIONS_GHC -fno-warn-deprecations #-}
 module Dahoop.ZMQ4.Trans where
 
-import Control.Applicative
+
 import Control.Concurrent.Async (Async)
 import Control.Monad
 import Control.Monad.Trans
