@@ -11,6 +11,7 @@ import System.Environment     (getArgs)
 import System.Exit            (exitFailure)
 import System.Random          (randomRIO)
 
+import qualified Control.Foldl as L
 import qualified Dahoop as D
 
 main :: IO ()
@@ -20,7 +21,7 @@ main =
          work = map return floats
          preload = 1.1
          secret = "BOO!"
-     let (master, slave, single) = D.dahoop masterHandler slaveHandler preload work workerThread
+     let (master, slave, single) = D.dahoop masterHandler slaveHandler preload work workerThread resultFold
      flip runReaderT secret $ case v of
        ["master"] -> let config = D.DistConfig 4001 4000 4002 4003 (D.IP4' 127 0 0 1) someSlaves
                          someSlaves = map f [5000, 5001] where f = D.TCP (D.IP4' 127 0 0 1)
@@ -31,20 +32,24 @@ main =
          do putStrLn "USAGE: $0 [slave PORT | master]"
             exitFailure
 
-masterHandler :: D.MasterEventHandler (ReaderT String IO) () Float
+resultFold :: L.FoldM (ReaderT String IO) Float ()
+resultFold = L.FoldM saveFunc (return ()) (const (return ()))
+  where saveFunc _ f = do
+          s <- ask
+          lift (putStrLn $ "The result was " ++ show (f::Float) ++ " and the secret is " ++ s)
+
+masterHandler :: D.MasterEventHandler (ReaderT String IO) ()
 masterHandler e = case e of
   D.Announcing ann         -> liftIO $ putStrLn $ "Announcing " ++ show ann
   D.Began n                -> liftIO $ putStrLn $ "Job #" ++ show n
   D.WaitingForWorkRequest  -> liftIO $ putStrLn "Waiting for slave"
   D.SentWork sid           -> liftIO $ putStrLn $ "Sent work to: " ++ show sid
-  D.ReceivedResult _ r _   -> saveFunc r
+  D.ReceivedResult _ _     -> return ()
   D.SentTerminate _        -> return ()
   D.Finished               -> liftIO $ putStrLn "Finished"
   D.SentPreload sid        -> liftIO $ putStrLn $ "Sent preload to: " ++ show sid
   D.RemoteEvent slaveid se -> liftIO $ print (slaveid, se)
-  where saveFunc f = do
-          s <- ask
-          lift (putStrLn $ "The result was " ++ show (f::Float) ++ " and the secret is " ++ s)
+
 
 slaveHandler :: D.SlaveEventHandler
 slaveHandler e = liftIO $ case e of
