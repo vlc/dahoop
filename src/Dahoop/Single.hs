@@ -15,7 +15,7 @@ runASingle :: (MonadIO m)
            -> SlaveEventHandler
            -> a
            -> [m b]
-           -> (forall m. (MonadIO m) => WorkDetails m a b c -> m r)
+           -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
            -> L.FoldM m r z
            -> m z
 runASingle mk sk preload workBuilders workFunction (L.FoldM step first extract) = do
@@ -42,7 +42,7 @@ runASingle mk sk preload workBuilders workFunction (L.FoldM step first extract) 
   masterLog (SentPreload slaveId)
   slaveLog ReceivedPreload
 
-  start <- first
+  initial <- first
 
   final <- foldM (\state (ix, action) -> do
     work <- action
@@ -56,7 +56,7 @@ runASingle mk sk preload workBuilders workFunction (L.FoldM step first extract) 
     masterLog (ReceivedResult slaveId (fromIntegral ix / fromIntegral workCount))
 
     step state result
-   ) start (zip [1..] workBuilders)
+   ) initial (zip [1..] workBuilders)
 
   masterLog (SentTerminate slaveId)
   masterLog Finished

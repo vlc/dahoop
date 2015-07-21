@@ -157,7 +157,7 @@ receiveLogs logPort eventQueue =
   do logSocket <- returning (socket Sub)
                             (`bindM` TCP Wildcard logPort)
      subscribe logSocket "" -- Subscribe to every incoming message
-     forever $
+     _ <- forever $
        do result <- receive logSocket
           let Right (slaveid, logEntry) = decode result :: Either String (M.SlaveId, SlaveLogEntry l)
           atomicallyIO $ writeTQueue eventQueue (RemoteEvent slaveid logEntry)
@@ -180,7 +180,7 @@ waitForAllResults k rp jc queue eventQueue workVar (first, step) =
                 -- it will be killed when it asks for the next bit of work
                 if jc == slaveJc then do
                   atomicallyIO $ do
-                    complete wid queue
+                    _ <- complete wid queue
                     p <- progress queue
                     writeTQueue eventQueue (ReceivedResult slaveid p)
                   lift $ step state stuff
@@ -200,7 +200,7 @@ waitForAllResults k rp jc queue eventQueue workVar (first, step) =
 
               if completed then
                 atomicallyIO $ do
-                  tryTakeTMVar workVar
+                  _ <- tryTakeTMVar workVar
                   putTMVar workVar Nothing
               else do
                 Just (wid, Repeats _, action) <- atomicallyIO $ start queue
