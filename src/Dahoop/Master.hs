@@ -22,6 +22,7 @@ import Control.Concurrent.STM
 import Data.ByteString          (ByteString)
 import Data.List.NonEmpty       (NonEmpty ((:|)))
 import Data.Serialize           (runGet, encode, decode, Serialize)
+import Network.HostName
 
 import System.ZMQ4.Monadic      (Pub (..), Pull (..), Sub (..), Receiver, Router (..), Sender, Poll (Sock), Event (In), poll)
 import Dahoop.ZMQ4.Trans        (ZMQT, Socket, receive, receiveMulti, runZMQT, liftZMQ, send, sendMulti, socket, subscribe, async)
@@ -43,7 +44,6 @@ data DistConfig = DistConfig {
                              ,_askPort        :: Int
                              ,_preloadPort    :: Int
                              ,_loggingPort    :: Int
-                             ,_connectAddress :: Connect
                              ,_slaves         :: [Address Connect]}
 makeLenses ''DistConfig
 
@@ -53,7 +53,8 @@ runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l,
 runAMaster k config preloadData work (L.FoldM step first extract) =
         runZMQT $ do jobCode <- liftIO M.generateJobCode
                      eventQueue <- atomicallyIO newTQueue
-                     announceThread <- liftZMQ $ async (announce (announcement config jobCode) (config ^. slaves) eventQueue)
+                     h <- liftIO getHostName
+                     announceThread <- liftZMQ $ async (announce (announcement config (DNS h) jobCode) (config ^. slaves) eventQueue)
                      -- liftIO . link $ announceThread
                      (liftIO . link) =<< liftZMQ (async (preload (config ^. preloadPort) preloadData eventQueue))
                      lift $ k (Began jobCode)
@@ -65,16 +66,17 @@ runAMaster k config preloadData work (L.FoldM step first extract) =
                      lift $ extract result
 
 announcement :: DistConfig
+                -> Connect
                 -> M.JobCode
                 -> M.Announcement
-announcement v jc =
+announcement v ourHostname jc =
   M.Announcement
       jc
       (tcpHere (v ^. resultsPort))
       (tcpHere (v ^. askPort))
       (tcpHere (v ^. preloadPort))
       (tcpHere (v ^. loggingPort))
-  where tcpHere = TCP (v ^. connectAddress)
+  where tcpHere = TCP ourHostname
 
 announce :: (MonadIO m) => M.Announcement -> [Address Connect] -> TQueue (MasterEvent l) -> ZMQT s m ()
 announce ann ss eventQueue =

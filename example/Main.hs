@@ -23,7 +23,7 @@ main =
          secret = "BOO!"
      let (master, slave, single) = D.dahoop masterHandler slaveHandler preload work workerThread resultFold
      flip runReaderT secret $ case v of
-       ["master"] -> let config = D.DistConfig 4001 4000 4002 4003 (D.IP4' 127 0 0 1) someSlaves
+       ["master"] -> let config = D.DistConfig 4001 4000 4002 4003 someSlaves
                          someSlaves = map f [5000, 5001] where f = D.TCP (D.IP4' 127 0 0 1)
                      in master config
        ["slave",ss] -> slave (read ss)
