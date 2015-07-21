@@ -13,6 +13,7 @@ module Dahoop (
 
 import Control.Monad.IO.Class
 import Control.Monad.Catch
+import qualified Control.Foldl as L
 import Data.Serialize
 
 import Dahoop.Event
@@ -22,15 +23,16 @@ import Dahoop.Single
 import Dahoop.ZMQ4
 
 dahoop :: (Serialize a, Serialize b, Serialize c, Serialize r, MonadIO m, MonadMask m)
-          => MasterEventHandler m c r
+          => MasterEventHandler m c
           -> SlaveEventHandler
           -> a
           -> [m b]
           -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
-          -> (DistConfig -> m (),
+          -> L.FoldM m r z
+          -> (DistConfig -> m z,
               Int -> m (),
-              m ())
-dahoop mk sk pre workBuilders workFunction =
-  (\distConfig -> runAMaster mk distConfig pre workBuilders,
+              m z)
+dahoop mk sk pre workBuilders workFunction fold =
+  (\distConfig -> runAMaster mk distConfig pre workBuilders fold,
    \port -> liftIO $ runASlave sk workFunction port,
-   runASingle mk sk pre workBuilders workFunction)
+   runASingle mk sk pre workBuilders workFunction fold)

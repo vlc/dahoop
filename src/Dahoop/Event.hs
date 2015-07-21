@@ -6,12 +6,12 @@ import GHC.Generics             (Generic)
 
 import Dahoop.Internal.Messages
 
-data MasterEvent c r
+data MasterEvent c
   = Announcing Announcement
   | Began JobCode
   | WaitingForWorkRequest
   | SentWork SlaveId
-  | ReceivedResult SlaveId r Float
+  | ReceivedResult SlaveId Float
   | SentTerminate SlaveId
   | Finished
   | SentPreload SlaveId
@@ -33,7 +33,7 @@ data SlaveLogEntry a = DahoopEntry SlaveEvent | UserEntry a deriving (Eq, Show, 
 
 instance (Serialize a) => Serialize (SlaveLogEntry a)
 
-type MasterEventHandler m l r = MasterEvent l r -> m ()
+type MasterEventHandler m l = MasterEvent l -> m ()
 
 type SlaveEventHandler = SlaveEvent -> IO ()
 

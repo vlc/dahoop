@@ -1,6 +1,8 @@
 {-# LANGUAGE RankNTypes                #-}
 module Dahoop.Single where
 
+import qualified Control.Foldl as L
+import Control.Monad (foldM)
 import Control.Monad.IO.Class
 
 import qualified Dahoop.Internal.Messages  as M
@@ -9,13 +11,14 @@ import           Dahoop.Event
 import           Dahoop.ZMQ4
 
 runASingle :: (MonadIO m)
-           => MasterEventHandler m c r
+           => MasterEventHandler m c
            -> SlaveEventHandler
            -> a
            -> [m b]
            -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
-           -> m ()
-runASingle mk sk preload workBuilders workFunction = do
+           -> L.FoldM m r z
+           -> m z
+runASingle mk sk preload workBuilders workFunction (L.FoldM step first extract) = do
   jobCode <- liftIO M.generateJobCode
   let slaveId = M.SlaveId "single" 1234
   let fakeAddress = TCP (IP4' 255 255 255 255) 1234
@@ -39,7 +42,9 @@ runASingle mk sk preload workBuilders workFunction = do
   masterLog (SentPreload slaveId)
   slaveLog ReceivedPreload
 
-  mapM_ (\(ix, action) -> do
+  initial <- first
+
+  final <- foldM (\state (ix, action) -> do
     work <- action
     slaveRemoteLog WaitingForWorkReply
     masterLog (SentWork slaveId)
@@ -48,9 +53,12 @@ runASingle mk sk preload workBuilders workFunction = do
     result <- workFunction (WorkDetails preload work clientLog)
     slaveRemoteLog $ FinishedUnit (WorkId ix)
 
-    masterLog (ReceivedResult slaveId result (fromIntegral ix / fromIntegral workCount))
-   ) (zip [1..] workBuilders)
+    masterLog (ReceivedResult slaveId (fromIntegral ix / fromIntegral workCount))
+
+    step state result
+   ) initial (zip [1..] workBuilders)
 
   masterLog (SentTerminate slaveId)
   masterLog Finished
-  return ()
+
+  extract final
