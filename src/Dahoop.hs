@@ -22,11 +22,11 @@ import Dahoop.Master
 import Dahoop.Single
 import Dahoop.ZMQ4
 
-dahoop :: (Serialize a, Serialize b, Serialize c, Serialize r, MonadIO m, MonadMask m)
-          => MasterEventHandler m c
-          -> SlaveEventHandler
+dahoop :: (Serialize a, Serialize b, Serialize c, Serialize r, MonadIO m, MonadMask m, Serialize i, Ord i)
+          => MasterEventHandler m i c
+          -> SlaveEventHandler i
           -> a
-          -> [m b]
+          -> [(i, m b)]
           -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
           -> L.FoldM m r z
           -> (DistConfig -> m z,

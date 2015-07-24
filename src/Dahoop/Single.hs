@@ -6,15 +6,14 @@ import Control.Monad (foldM)
 import Control.Monad.IO.Class
 
 import qualified Dahoop.Internal.Messages  as M
-import           Dahoop.Internal.WorkQueue
 import           Dahoop.Event
 import           Dahoop.ZMQ4
 
 runASingle :: (MonadIO m)
-           => MasterEventHandler m c
-           -> SlaveEventHandler
+           => MasterEventHandler m i c
+           -> SlaveEventHandler i
            -> a
-           -> [m b]
+           -> [(i, m b)]
            -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
            -> L.FoldM m r z
            -> m z
@@ -29,8 +28,6 @@ runASingle mk sk preload workBuilders workFunction (L.FoldM step first extract) 
   let slaveRemoteLog e = do
         masterLog (RemoteEvent slaveId (DahoopEntry e))
         slaveLog e
-
-  let workCount = length workBuilders
 
   masterLog (Began jobCode)
   masterLog (Announcing fakeAnnouncement)
@@ -47,16 +44,16 @@ runASingle mk sk preload workBuilders workFunction (L.FoldM step first extract) 
   final <- foldM (\state (ix, action) -> do
     work <- action
     slaveRemoteLog WaitingForWorkReply
-    masterLog (SentWork slaveId)
+    masterLog (SentWork slaveId ix)
 
-    slaveRemoteLog $ StartedUnit (WorkId ix)
+    slaveRemoteLog $ StartedUnit ix
     result <- workFunction (WorkDetails preload work clientLog)
-    slaveRemoteLog $ FinishedUnit (WorkId ix)
+    slaveRemoteLog $ FinishedUnit ix
 
-    masterLog (ReceivedResult slaveId (fromIntegral ix / fromIntegral workCount))
+    masterLog (ReceivedResult slaveId ix 0.0) -- TODO fake out actual percent complete?
 
     step state result
-   ) initial (zip [1..] workBuilders)
+   ) initial workBuilders
 
   masterLog (SentTerminate slaveId)
   masterLog Finished

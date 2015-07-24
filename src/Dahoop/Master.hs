@@ -48,9 +48,9 @@ data DistConfig = DistConfig {
                              }
 makeLenses ''DistConfig
 
-runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l,
+runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l, Ord i, Serialize i,
                MonadIO m, MonadMask m) =>
-              MasterEventHandler m l -> DistConfig -> a -> [m b] -> L.FoldM m r z -> m z
+              MasterEventHandler m i l -> DistConfig -> a -> [(i, m b)] -> L.FoldM m r z -> m z
 runAMaster k config preloadData work (L.FoldM step first extract) =
         runZMQT $ do jobCode <- liftIO M.generateJobCode
                      eventQueue <- atomicallyIO newTQueue
@@ -81,7 +81,7 @@ announcement v ourHostname jc =
       (tcpHere (v ^. loggingPort))
   where tcpHere = TCP ourHostname
 
-announce :: (MonadIO m) => (Socket s Pub) -> M.Announcement -> TQueue (MasterEvent l) -> ZMQT s m ()
+announce :: (MonadIO m) => (Socket s Pub) -> M.Announcement -> TQueue (MasterEvent i l) -> ZMQT s m ()
 announce announceSocket ann eventQueue =
   do -- 'Pub' sockets don't queue messages, they broadcast only to things
      -- that have connected.
@@ -94,7 +94,7 @@ announce announceSocket ann eventQueue =
           -- we wait so that we don't spam more than necessary
           liftIO $ threadDelay 500000
 
-preload :: (MonadIO m, Serialize a) => Int -> a -> TQueue (MasterEvent l) -> ZMQT s m ()
+preload :: (MonadIO m, Serialize a) => Int -> a -> TQueue (MasterEvent i l) -> ZMQT s m ()
 preload port preloadData eventQueue = do
   s <- returning (socket Router) (`bindM` TCP Wildcard port)
   forever $ do
@@ -110,8 +110,8 @@ broadcastFinished n announceSocket =
 
 
 -- NOTE: Send and receive must be done using different sockets, as they are used in different threads
-theProcess' :: forall m a l z x r. (MonadIO m, MonadMask m, Serialize a, Serialize l, Serialize r)
-            => MasterEventHandler m l -> Int -> M.JobCode -> Int -> Int -> [m a] -> TQueue (MasterEvent l) -> (x, x -> r -> m x) -> ZMQT z m x
+theProcess' :: forall i m a l z x r. (Ord i, MonadIO m, MonadMask m, Serialize a, Serialize l, Serialize r, Serialize i)
+            => MasterEventHandler m i l -> Int -> M.JobCode -> Int -> Int -> [(i, m a)] -> TQueue (MasterEvent i l) -> (x, x -> r -> m x) -> ZMQT z m x
 theProcess' k sendPort jc rport logPort work eventQueue foldbits = do
   workQueue <- atomicallyIO $ buildWork work
   workVar   <- atomicallyIO newEmptyTMVar
@@ -121,7 +121,7 @@ theProcess' k sendPort jc rport logPort work eventQueue foldbits = do
 
   waitForAllResults k rport jc workQueue eventQueue workVar foldbits
 
-dealWork :: (MonadIO m, Serialize a) => Int -> M.JobCode -> TMVar (Maybe (WorkId, a)) -> TQueue (MasterEvent l) -> ZMQT s m ()
+dealWork :: (MonadIO m, Serialize a, Serialize i) => Int -> M.JobCode -> TMVar (Maybe (i, a)) -> TQueue (MasterEvent i l) -> ZMQT s m ()
 dealWork port n workVar eventQueue =
   do sendSkt <- returning (socket Router)
                           (`bindM` TCP Wildcard port)
@@ -141,7 +141,7 @@ dealWork port n workVar eventQueue =
                     -- this would give time for recently received results to
                     -- get processed, and also give time for slightly slower slaves
                     -- to get their results in
-                    atomicallyIO $ writeTQueue eventQueue (SentWork slaveid)
+                    atomicallyIO $ writeTQueue eventQueue (SentWork slaveid wid)
                     (replyWith . M.work) (wid,thing) >> loop
                   Nothing ->
                     replyWith (M.terminate n)
@@ -153,19 +153,19 @@ dealWork port n workVar eventQueue =
        atomicallyIO (writeTQueue eventQueue (SentTerminate slaveid))
        replyWith (M.terminate n)
 
-receiveLogs :: forall z m l. (MonadIO m, Serialize l) => Int -> TQueue (MasterEvent l) -> ZMQT z m ()
+receiveLogs :: forall z m i l. (MonadIO m, Serialize i, Serialize l) => Int -> TQueue (MasterEvent i l) -> ZMQT z m ()
 receiveLogs logPort eventQueue =
   do logSocket <- returning (socket Sub)
                             (`bindM` TCP Wildcard logPort)
      subscribe logSocket "" -- Subscribe to every incoming message
      _ <- forever $
        do result <- receive logSocket
-          let Right (slaveid, logEntry) = decode result :: Either String (M.SlaveId, SlaveLogEntry l)
+          let Right (slaveid, logEntry) = decode result :: Either String (M.SlaveId, SlaveLogEntry i l)
           atomicallyIO $ writeTQueue eventQueue (RemoteEvent slaveid logEntry)
      return ()
 
-waitForAllResults :: (MonadIO m, Serialize r)
-                  => MasterEventHandler m l -> Int -> M.JobCode -> Work (m a) -> TQueue (MasterEvent l) -> TMVar (Maybe (WorkId, a)) -> (x, x -> r -> m x) -> ZMQT z m x
+waitForAllResults :: (MonadIO m, Serialize r, Serialize i, Ord i)
+                  => MasterEventHandler m i l -> Int -> M.JobCode -> Work i (m a) -> TQueue (MasterEvent i l) -> TMVar (Maybe (i, a)) -> (x, x -> r -> m x) -> ZMQT z m x
 waitForAllResults k rp jc queue eventQueue workVar (first, step) =
   do receiveSocket <- returning (socket Pull)
                                 (`bindM` TCP Wildcard rp)
@@ -183,7 +183,7 @@ waitForAllResults k rp jc queue eventQueue workVar (first, step) =
                   atomicallyIO $ do
                     _ <- complete wid queue
                     p <- progress queue
-                    writeTQueue eventQueue (ReceivedResult slaveid p)
+                    writeTQueue eventQueue (ReceivedResult slaveid wid p)
                   lift $ step state stuff
                 else
                   return state

@@ -41,8 +41,8 @@ import Dahoop.ZMQ4
 -- any async tasks that are expected to run forever (in the context of a job) need to be
 -- explicitly cancelled
 
-runASlave :: (Serialize a, Serialize b, Serialize c, Serialize d)
-          => SlaveEventHandler -> (forall m. (MonadIO m) => WorkDetails m a b c -> m d) -> Address Connect -> IO ()
+runASlave :: (Serialize i, Serialize a, Serialize b, Serialize c, Serialize d)
+          => SlaveEventHandler i -> (forall m. (MonadIO m) => WorkDetails m a b c -> m d) -> Address Connect -> IO ()
 runASlave k workFunction s =
   forever $ runZMQ (do (v,queue) <- announcementsQueue s
                        ann <- waitForAnnouncement k queue
@@ -62,7 +62,7 @@ runASlave k workFunction s =
                                    threadDelay 500000
                        return ())
 
-waitForAnnouncement :: (MonadIO m) => SlaveEventHandler -> TChan ByteString -> ZMQT z m Announcement
+waitForAnnouncement :: (MonadIO m) => SlaveEventHandler i -> TChan ByteString -> ZMQT z m Announcement
 waitForAnnouncement k queue =
   do liftIO $ k AwaitingAnnouncement
      ann <- atomicallyIO loop
@@ -89,7 +89,7 @@ waitForDone queue ourJc =
                 Right _ -> loop
      atomicallyIO loop
 
-requestPreload :: (MonadIO m) => SlaveId -> SlaveEventHandler -> Address Connect -> ZMQT z m ByteString
+requestPreload :: (MonadIO m) => SlaveId -> SlaveEventHandler i -> Address Connect -> ZMQT z m ByteString
 requestPreload slaveid k port =
   do s <- socket Req
      connectM s port
@@ -98,13 +98,13 @@ requestPreload slaveid k port =
      receive s <*
        liftIO (k ReceivedPreload)
 
-workLoop :: forall m a b c d t t1 t2 z.
+workLoop :: forall m a b c d i t t1 t2 z.
             (MonadIO m, MonadMask m,
-             Serialize a, Serialize b, Serialize c, Serialize d,
+             Serialize i, Serialize a, Serialize b, Serialize c, Serialize d,
              Receiver t, Sender t1, Sender t, Sender t2)
             => SlaveId
             -> JobCode
-            -> SlaveEventHandler
+            -> SlaveEventHandler i
             -> Socket z t
             -> Socket z t1
             -> Socket z t2
@@ -125,8 +125,8 @@ workLoop slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
                     send workOut [] . reply $ (slaveid, jc, wid, result)
                     sendDahoopLog (FinishedUnit wid)
                     loop (succ c)
-        sendDahoopLog e = liftIO (k e) >> send logOut [] (encode $ (slaveid, (DahoopEntry e :: SlaveLogEntry c)))
-        sendUserLog   e = send logOut [] (encode (slaveid, UserEntry e))
+        sendDahoopLog e = liftIO (k e) >> send logOut [] (encode $ (slaveid, (DahoopEntry e :: SlaveLogEntry i c)))
+        sendUserLog   e = send logOut [] (encode (slaveid, UserEntry e :: SlaveLogEntry i c))
 
 monitorUntilStopped :: Socket z t -> (Maybe EventMsg -> ZMQ z a) -> ZMQ z (Async (Maybe EventMsg))
 monitorUntilStopped skt yield =

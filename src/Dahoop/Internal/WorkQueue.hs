@@ -11,18 +11,14 @@ import           Control.Lens
 import           Data.Foldable
 import qualified Data.Map               as M
 import           Data.Maybe             (fromMaybe)
-import           Data.Serialize
 
 -- $setup
 -- >>> import Test.QuickCheck
 
-newtype WorkId = WorkId Int deriving (Eq, Show, Ord, Num, Serialize)
-makePrisms ''WorkId
-
 -- | Out work queue
-data Work a =
-  Work { _todo :: TQueue (WorkId, History, a)
-       , _done :: TVar (M.Map WorkId Int)
+data Work i a =
+  Work { _todo :: TQueue (i, History, a)
+       , _done :: TVar (M.Map i Int)
        , _size :: Int }
 -- invariants: in a fresh queue, all keys in the map are in the queue
 
@@ -31,14 +27,14 @@ newtype History = Repeats Int deriving (Eq, Show, Num, Enum)
 
 makeLenses ''Work
 
-buildWork :: [a] -> STM (Work a)
+buildWork :: Ord i => [(i, a)] -> STM (Work i a)
 buildWork ws = Work <$> initialQueue <*> newTVar initMap <*> pure (length ws)
   where initialQueue =
           do q <- newTQueue
              _ <- traverse (\(wid, a) -> writeTQueue q (wid,Repeats 0,a)) idWork
              return q
         initMap = M.fromList . toList . fmap (\(wid, _) -> (wid, 0)) $ idWork
-        idWork = zip (map WorkId [1..]) ws
+        idWork = ws -- zip (map WorkId [1..]) ws
 
 -- | Start a work item, returns Nothing if we have nothing to do
 -- >>> atomically $ buildWork [] >>= start
@@ -51,7 +47,7 @@ buildWork ws = Work <$> initialQueue <*> newTVar initMap <*> pure (length ws)
 -- Just (WorkId 2,Repeats 0,())
 -- >>> atomically $ buildWork [(), ()] >>= \w -> start w >> start w >> start w
 -- Just (WorkId 1,Repeats 1,())
-start :: Work a -> STM (Maybe (WorkId, History, a))
+start :: Ord i => Work i a -> STM (Maybe (i, History, a))
 start w = do tryWork <- tryReadTQueue (_todo w)
              -- Completed items are not removed from the queue
              -- So we need to check that we haven't already completed this item
@@ -72,7 +68,7 @@ start w = do tryWork <- tryReadTQueue (_todo w)
 -- Completing an item means it won't be started again
 -- >>> atomically $ buildWork [(), (), ()] >>= \w -> complete 1 w >> complete 2 w >> start w
 -- Just (WorkId 3,Repeats 0,())
-complete :: WorkId -> Work a -> STM Int
+complete :: Ord i => i -> Work i a -> STM Int
 complete wid w = do doned <- readTVar $ _done w
                     let next = succ . fromMaybe 0 $ doned ^. at wid
                     -- We cannot remove items from a TQueue, so we track what is done here
@@ -87,11 +83,11 @@ complete wid w = do doned <- readTVar $ _done w
 -- False
 -- >>> atomically $ buildWork [()] >>= \w -> complete 1 w >> isComplete w
 -- True
-isComplete :: Work a -> STM Bool
+isComplete :: Work i a -> STM Bool
 isComplete w = do doned <- readTVar $ _done w
                   return $ all (> 0) doned
   -- we are done if all keys in the map are >0
 
-progress :: Work a -> STM Float
+progress :: Work i a -> STM Float
 progress w = do donecount <- fmap M.size $ readTVar $ _done w
                 return (fromIntegral donecount / fromIntegral (w ^. size))

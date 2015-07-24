@@ -18,7 +18,7 @@ main :: IO ()
 main =
   do v <- getArgs
      let floats = [(1.0 :: Float)..3.0]
-         work = map return floats
+         work = zip [1..] . map return $ floats
          preload = 1.1
          secret = "BOO!"
      let (master, slave, single) = D.dahoop masterHandler slaveHandler preload work workerThread resultFold
@@ -37,20 +37,20 @@ resultFold = L.FoldM saveFunc (return ()) (const (return ()))
           s <- ask
           lift (putStrLn $ "The result was " ++ show (f::Float) ++ " and the secret is " ++ s)
 
-masterHandler :: D.MasterEventHandler (ReaderT String IO) ()
+masterHandler :: D.MasterEventHandler (ReaderT String IO) Int ()
 masterHandler e = case e of
   D.Announcing ann         -> liftIO $ putStrLn $ "Announcing " ++ show ann
   D.Began n                -> liftIO $ putStrLn $ "Job #" ++ show n
   D.WaitingForWorkRequest  -> liftIO $ putStrLn "Waiting for slave"
-  D.SentWork sid           -> liftIO $ putStrLn $ "Sent work to: " ++ show sid
-  D.ReceivedResult _ _     -> return ()
+  D.SentWork sid i         -> liftIO $ putStrLn $ "Sent work to: " ++ show sid ++ ", " ++ show i
+  D.ReceivedResult _ i _   -> liftIO $ putStrLn $ "Received " ++ show i
   D.SentTerminate _        -> return ()
   D.Finished               -> liftIO $ putStrLn "Finished"
   D.SentPreload sid        -> liftIO $ putStrLn $ "Sent preload to: " ++ show sid
   D.RemoteEvent slaveid se -> liftIO $ print (slaveid, se)
 
 
-slaveHandler :: D.SlaveEventHandler
+slaveHandler :: D.SlaveEventHandler Int
 slaveHandler e = liftIO $ case e of
   D.AwaitingAnnouncement -> putStrLn "Waiting for job"
   D.ReceivedAnnouncement a -> putStrLn $ "Received " ++ show a

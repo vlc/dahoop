@@ -6,36 +6,36 @@ import GHC.Generics             (Generic)
 
 import Dahoop.Internal.Messages
 
-data MasterEvent c
+data MasterEvent i c
   = Announcing Announcement
   | Began JobCode
   | WaitingForWorkRequest
-  | SentWork SlaveId
-  | ReceivedResult SlaveId Float
+  | SentWork SlaveId i
+  | ReceivedResult SlaveId i Float
   | SentTerminate SlaveId
   | Finished
   | SentPreload SlaveId
-  | RemoteEvent SlaveId (SlaveLogEntry c) deriving (Eq, Show)
+  | RemoteEvent SlaveId (SlaveLogEntry i c) deriving (Eq, Show)
 
-data SlaveEvent
+data SlaveEvent i
   = AwaitingAnnouncement
   | ReceivedAnnouncement Announcement
   | RequestingPreload
   | ReceivedPreload
   | WaitingForWorkReply
-  | StartedUnit WorkId
-  | FinishedUnit WorkId
+  | StartedUnit i
+  | FinishedUnit i
   | FinishedJob Int JobCode deriving (Eq, Show, Generic)
 
-instance Serialize SlaveEvent
+instance Serialize i => Serialize (SlaveEvent i)
 
-data SlaveLogEntry a = DahoopEntry SlaveEvent | UserEntry a deriving (Eq, Show, Generic)
+data SlaveLogEntry i a = DahoopEntry (SlaveEvent i) | UserEntry a deriving (Eq, Show, Generic)
 
-instance (Serialize a) => Serialize (SlaveLogEntry a)
+instance (Serialize i, Serialize a) => Serialize (SlaveLogEntry i a)
 
-type MasterEventHandler m l = MasterEvent l -> m ()
+type MasterEventHandler m i l = MasterEvent i l -> m ()
 
-type SlaveEventHandler = SlaveEvent -> IO ()
+type SlaveEventHandler i = SlaveEvent i -> IO ()
 
 data WorkDetails m a b c = WorkDetails { workPreload :: a,
                                          workPayload :: b,

@@ -5,7 +5,7 @@ module Dahoop.Internal.Messages
        (terminate, work, getWorkOrTerminate, Announcement(..), reply,
         getReply, generateJobCode, resultsAddress, preloadAddress,
         askAddress, annJobCode, JobCode(..), announcement, finishUp,
-        getAnnouncementOrFinishUp, WorkId, loggingAddress, SlaveId(..))
+        getAnnouncementOrFinishUp, loggingAddress, SlaveId(..))
        where
 
 import Control.Lens        (makeLenses)
@@ -16,7 +16,6 @@ import Data.UUID.V4        (nextRandom)
 import GHC.Generics
 import Network.HostName
 
-import Dahoop.Internal.WorkQueue (WorkId (..))
 import Dahoop.ZMQ4
 
 data JobCode = JobCode UUID deriving (Eq, Show, Generic)
@@ -44,19 +43,19 @@ terminate :: JobCode -> ByteString
 terminate n = encode (Left n :: Either JobCode ())
 
 -- | Master -> Slave, Deliver work to a slave
-work :: Serialize a => (WorkId, a) -> ByteString
-work = runPut . put . (Right :: (WorkId, a) -> Either JobCode (WorkId, a))
+work :: (Serialize i, Serialize a) => (i, a) -> ByteString
+work = runPut . put . (Right :: (i, a) -> Either JobCode (i, a))
 
 -- | Slave:
-getWorkOrTerminate :: Serialize a => Get (Either JobCode (WorkId, a))
+getWorkOrTerminate :: (Serialize i, Serialize a) => Get (Either JobCode (i, a))
 getWorkOrTerminate = get
 
 -- | Slave -> Master, Respond to a work message with a result
-reply :: Serialize a => (SlaveId, JobCode, WorkId, a) -> ByteString
+reply :: (Serialize a, Serialize i) => (SlaveId, JobCode, i, a) -> ByteString
 reply = runPut . put
 
 -- | Master: Decode reply
-getReply :: Serialize a => Get (SlaveId, JobCode, WorkId, a)
+getReply :: (Serialize a, Serialize i) => Get (SlaveId, JobCode, i, a)
 getReply = get
 
 -- ****************************
