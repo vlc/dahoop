@@ -44,7 +44,8 @@ data DistConfig = DistConfig {
                              ,_askPort        :: Int
                              ,_preloadPort    :: Int
                              ,_loggingPort    :: Int
-                             ,_slaves         :: [Address Connect]}
+                             ,_announcePort   :: Int
+                             }
 makeLenses ''DistConfig
 
 runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l,
@@ -54,14 +55,16 @@ runAMaster k config preloadData work (L.FoldM step first extract) =
         runZMQT $ do jobCode <- liftIO M.generateJobCode
                      eventQueue <- atomicallyIO newTQueue
                      h <- liftIO getHostName
-                     announceThread <- liftZMQ $ async (announce (announcement config (DNS h) jobCode) (config ^. slaves) eventQueue)
+                     sock <- liftZMQ $ socket Pub
+                     bindM sock $ TCP Wildcard (config^.announcePort)
+                     announceThread <- liftZMQ $ async (announce sock (announcement config (DNS h) jobCode) eventQueue)
                      -- liftIO . link $ announceThread
                      (liftIO . link) =<< liftZMQ (async (preload (config ^. preloadPort) preloadData eventQueue))
                      lift $ k (Began jobCode)
                      state <- lift first
                      result <- theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) (config ^. loggingPort) work eventQueue (state, step)
                      liftIO (cancel announceThread)
-                     broadcastFinished jobCode (config ^. slaves)
+                     broadcastFinished jobCode sock
                      lift $ k Finished
                      lift $ extract result
 
@@ -78,11 +81,9 @@ announcement v ourHostname jc =
       (tcpHere (v ^. loggingPort))
   where tcpHere = TCP ourHostname
 
-announce :: (MonadIO m) => M.Announcement -> [Address Connect] -> TQueue (MasterEvent l) -> ZMQT s m ()
-announce ann ss eventQueue =
-  do announceSocket <- socket Pub
-     mapM_ (connectM announceSocket) ss
-     -- 'Pub' sockets don't queue messages, they broadcast only to things
+announce :: (MonadIO m) => (Socket s Pub) -> M.Announcement -> TQueue (MasterEvent l) -> ZMQT s m ()
+announce announceSocket ann eventQueue =
+  do -- 'Pub' sockets don't queue messages, they broadcast only to things
      -- that have connected.
      -- Need to give some time for the slave connections to complete
      liftIO (threadDelay 500000)
@@ -102,11 +103,9 @@ preload port preloadData eventQueue = do
     atomicallyIO $ writeTQueue eventQueue (SentPreload slaveid)
     replyWith (encode preloadData)
 
-broadcastFinished :: (MonadIO m) => M.JobCode -> [Address Connect] -> ZMQT z m ()
-broadcastFinished n ss =
-  do announceSocket <- socket Pub
-     mapM_ (connectM announceSocket) ss
-     liftIO (threadDelay 500000)
+broadcastFinished :: (MonadIO m) => M.JobCode -> Socket z Pub -> ZMQT z m ()
+broadcastFinished n announceSocket =
+  do liftIO (threadDelay 500000)
      (send announceSocket [] . M.finishUp) n
 
 

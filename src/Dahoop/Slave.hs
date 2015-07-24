@@ -42,12 +42,12 @@ import Dahoop.ZMQ4
 -- explicitly cancelled
 
 runASlave :: (Serialize a, Serialize b, Serialize c, Serialize d)
-          => SlaveEventHandler -> (forall m. (MonadIO m) => WorkDetails m a b c -> m d) -> Int -> IO ()
+          => SlaveEventHandler -> (forall m. (MonadIO m) => WorkDetails m a b c -> m d) -> Address Connect -> IO ()
 runASlave k workFunction s =
   forever $ runZMQ (do (v,queue) <- announcementsQueue s
                        ann <- waitForAnnouncement k queue
                        h   <- liftIO getHostName
-                       let slaveid = SlaveId h s
+                       let slaveid = SlaveId h (-1) -- TODO Nick slave id
                        Right (preload :: c) <- decode <$> requestPreload slaveid k (ann ^. preloadAddress)
                        worker <- async (do workIn  <- returning (socket Req)  (`connectM` (ann ^. askAddress))
                                            workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
@@ -145,13 +145,13 @@ monitorUntilStopped skt yield =
 -- >>> twice $ runZMQ $ announcementsQueue 5 >>= \(v,_) ->  liftIO (cancel v >> print ())
 -- ()
 -- ()
-announcementsQueue :: Int -> ZMQ z (Async a, TChan ByteString)
-announcementsQueue port =
+announcementsQueue :: Address Connect -> ZMQ z (Async a, TChan ByteString)
+announcementsQueue address =
   do queue <- liftIO newTChanIO
      v <- async $
           do subSocket <- returning (socket Sub) $
                           \s ->
-                            do bindM s (TCP Wildcard port)
+                            do connectM s address
                                subscribe s "" -- Subscribe to all messages
              forever (do waitRead subSocket
                          v <- receive subSocket
