@@ -7,9 +7,10 @@ module Main where
 
 import Control.Monad.Reader
 import Control.Concurrent     (threadDelay)
+import Control.Concurrent.Async
 import System.Environment     (getArgs)
 import System.Exit            (exitFailure)
-import System.Random          (randomRIO)
+import System.Random
 
 import qualified Control.Foldl as L
 import qualified Dahoop as D
@@ -17,19 +18,20 @@ import qualified Dahoop as D
 main :: IO ()
 main =
   do v <- getArgs
-     let floats = [(1.0 :: Float)..3.0]
-         work = zip [1..] . map return $ floats
-         preload = 1.1
+     let preload = 1.1 :: Float
          secret = "BOO!"
-     let (master, slave, single) = D.dahoop masterHandler slaveHandler preload work workerThread resultFold
      flip runReaderT secret $ case v of
-       ["master",port] -> let config = D.DistConfig 4001 4000 4002 4003 (read port)
-                          in master config
-       ["slave", port] -> slave (D.TCP (D.IP4' 127 0 0 1) (read port))
-       ["single"] -> single
+       ["master", numWorkUnits, port] -> let config = D.DistConfig 4001 4000 4002 4003 (read port)
+                          in D.runAMaster masterHandler config preload (fmap (fmap liftIO) $ makeWorkUnits $ read numWorkUnits) resultFold
+       ["slave", numSlaves, port] -> liftIO $ do
+          as <- replicateM (read numSlaves) $ async $ D.runASlave slaveHandler workerThread (D.TCP (D.IP4' 127 0 0 1) (read port))
+          mapM_ wait as
        _ -> liftIO $
-         do putStrLn "USAGE: $0 [slave PORT | master]"
+         do putStrLn "USAGE: $0 [slave NUM_WORKERS MASTER_PORT | master NUM_WORK_UNITS PORT]"
             exitFailure
+
+makeWorkUnits :: Int -> [(Int, IO Float)]
+makeWorkUnits n = zip [1..] $ replicate n (getStdRandom random)
 
 resultFold :: L.FoldM (ReaderT String IO) Float ()
 resultFold = L.FoldM saveFunc (return ()) (const (return ()))
@@ -51,7 +53,7 @@ masterHandler e = case e of
 
 
 slaveHandler :: D.SlaveEventHandler Int
-slaveHandler e = liftIO $ case e of
+slaveHandler e = case e of
   D.AwaitingAnnouncement -> putStrLn "Waiting for job"
   D.ReceivedAnnouncement a -> putStrLn $ "Received " ++ show a
   D.StartedUnit a -> putStrLn $ "Started unit " ++ show a

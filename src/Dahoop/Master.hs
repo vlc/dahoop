@@ -110,16 +110,26 @@ broadcastFinished n announceSocket =
 
 
 -- NOTE: Send and receive must be done using different sockets, as they are used in different threads
-theProcess' :: forall i m a l z x r. (Ord i, MonadIO m, MonadMask m, Serialize a, Serialize l, Serialize r, Serialize i)
-            => MasterEventHandler m i l -> Int -> M.JobCode -> Int -> Int -> [(i, m a)] -> TQueue (MasterEvent i l) -> (x, x -> r -> m x) -> ZMQT z m x
+theProcess' :: forall i m a l z x r.
+               (Ord i, MonadIO m, MonadMask m, Serialize a, Serialize l, Serialize r, Serialize i)
+            => MasterEventHandler m i l
+            -> Int
+            -> M.JobCode
+            -> Int
+            -> Int
+            -> [(i, m a)]
+            -> TQueue (MasterEvent i l)
+            -> (x, x -> r -> m x)
+            -> ZMQT z m x
 theProcess' k sendPort jc rport logPort work eventQueue foldbits = do
-  workQueue <- atomicallyIO $ buildWork work
-  workVar   <- atomicallyIO newEmptyTMVar
-  liftZMQ $ do
-    (liftIO . link) =<< async (dealWork sendPort jc workVar eventQueue)
-    (liftIO . link) =<< async (receiveLogs logPort eventQueue)
-
-  waitForAllResults k rport jc workQueue eventQueue workVar foldbits
+    workQueue <- atomicallyIO $ buildWork work
+    workVar <- atomicallyIO newEmptyTMVar
+    liftZMQ $
+        do (liftIO . link) =<<
+               async (dealWork sendPort jc workVar eventQueue)
+           (liftIO . link) =<<
+               async (receiveLogs logPort eventQueue)
+    waitForAllResults k rport jc workQueue eventQueue workVar foldbits
 
 dealWork :: (MonadIO m, Serialize a, Serialize i) => Int -> M.JobCode -> TMVar (Maybe (i, a)) -> TQueue (MasterEvent i l) -> ZMQT s m ()
 dealWork port n workVar eventQueue =
