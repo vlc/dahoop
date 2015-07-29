@@ -228,10 +228,10 @@ hasReceivedMessage s =
 slurpTQueue :: MonadIO m => TQueue a -> (a -> m ()) -> m ()
 slurpTQueue q f = go
               where go = do
-                    event <- atomicallyIO $ tryReadTQueue q
-                    case event of
-                      Just e -> f e >> go
-                      Nothing -> return ()
+                            event <- atomicallyIO $ tryReadTQueue q
+                            case event of
+                                Just e -> f e >> go
+                                Nothing -> return ()
 
 replyToReq :: (MonadIO m) => Socket z Router -> ByteString -> ZMQT z m ()
 replyToReq sendSkt m =
