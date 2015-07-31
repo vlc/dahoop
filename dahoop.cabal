@@ -38,6 +38,7 @@ library
                 , random
                 , semigroups
                 , stm
+                , stm-chans
                 , transformers
                 , uuid
                 , zeromq4-haskell
