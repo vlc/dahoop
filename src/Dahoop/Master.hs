@@ -134,7 +134,7 @@ theProcess' k sendPort jc rport logPort work eventQueue foldbits = do
                async (receiveLogs logPort eventQueue)
     waitForAllResults k rport jc work eventQueue workVar foldbits
 
-dealWork :: (MonadIO m, Serialize a, Serialize i) => Int -> M.JobCode -> TBMQueue (i, a) -> TQueue (MasterEvent i l) -> ZMQT s m ()
+dealWork :: (MonadIO m, Serialize i) => Int -> M.JobCode -> TBMQueue (i, ByteString) -> TQueue (MasterEvent i l) -> ZMQT s m ()
 dealWork port n workVar eventQueue =
   do sendSkt <- returning (socket Router)
                           (`bindM` TCP Wildcard port)
@@ -148,7 +148,7 @@ dealWork port n workVar eventQueue =
                 -- I don't think the workVar is really needed, the worqueue could just be taken from directly
                 item <- atomicallyIO $ readTBMQueue workVar
                 case item of
-                  Just (wid, thing) -> do
+                  Just (wid, msg) -> do
                     -- if we've just started repeating, we could return
                     -- the item to the queue (unGetTQueue), tell the client to hold tight
                     -- for a little while, sleep for a bit, then loop.
@@ -156,7 +156,7 @@ dealWork port n workVar eventQueue =
                     -- get processed, and also give time for slightly slower slaves
                     -- to get their results in
                     atomicallyIO $ writeTQueue eventQueue (SentWork slaveid wid)
-                    (replyWith . M.work) (wid,thing)
+                    replyWith msg
                     loop
                   Nothing ->
                     replyWith (M.terminate n)
@@ -179,13 +179,13 @@ receiveLogs logPort eventQueue =
           atomicallyIO $ writeTQueue eventQueue (RemoteEvent slaveid logEntry)
      return ()
 
-waitForAllResults :: (MonadIO m, Serialize r, Serialize i, Ord i)
+waitForAllResults :: (MonadIO m, Serialize r, Serialize i, Ord i, Serialize a)
                   => MasterEventHandler m i l
                   -> Int
                   -> M.JobCode
                   -> [(i, IO a)]
                   -> TQueue (MasterEvent i l)
-                  -> TBMQueue (i, a)
+                  -> TBMQueue (i, ByteString)
                   -> (x, x -> r -> m x)
                   -> ZMQT z m x
 waitForAllResults k rp jc work eventQueue workVar (first, step) =
@@ -196,7 +196,9 @@ waitForAllResults k rp jc work eventQueue workVar (first, step) =
        populateWork = do
                 next  <- atomicallyIO $ start queue
                 case next of
-                  Nothing -> atomicallyIO $ closeTBMQueue workVar
+                  Nothing -> atomicallyIO $ do
+                    closeTBMQueue workVar -- I think this should read all items off of the queue to make it empty
+                    drainQueue workVar
                   Just (wid, _, action) -> do
 
                     -- I think this can be spawned into a thread.
@@ -210,7 +212,7 @@ waitForAllResults k rp jc work eventQueue workVar (first, step) =
                     -- an available slot goes away when it is filled
                     
                     workItem <- action
-                    atomicallyIO $ writeTBMQueue workVar (wid, workItem) -- should workItem be an async around action here?
+                    atomicallyIO $ writeTBMQueue workVar $ (wid, M.work (wid, workItem)) -- should workItem be an async around action here?
                     populateWork
 
      workVarA <- liftIO $ A.async populateWork -- TODO, should possibly be linked to this thread?
@@ -223,10 +225,10 @@ waitForAllResults k rp jc work eventQueue workVar (first, step) =
                 -- If a slave is sending work for the wrong job code,
                 -- it will be killed when it asks for the next bit of work
                 when (jc == slaveJc) $ do
-                    atomicallyIO $ do
+                    p <- atomicallyIO $ do
                         _ <- complete wid queue
-                        p <- progress queue
-                        writeTQueue eventQueue (ReceivedResult slaveid wid p)
+                        progress queue
+                    atomicallyIO $ writeTQueue eventQueue (ReceivedResult slaveid wid p)
                     current <- get
                     v <- lift . lift $ step current stuff
                     put v
@@ -247,14 +249,25 @@ hasReceivedMessage s =
               return $! elem In $ head events
 
 slurpTQueue :: MonadIO m => TQueue a -> (a -> m ()) -> m ()
-slurpTQueue q f = go
-              where go = do
-                            event <- atomicallyIO $ tryReadTQueue q
-                            case event of
-                                Just e -> do
-                                  f e
-                                  go
-                                Nothing -> return ()
+slurpTQueue q f = do
+  events <- atomicallyIO $ readAllFromQueue q
+  mapM_ f events
+
+drainQueue :: TBMQueue a -> STM ()
+drainQueue q = go
+  where go = do
+          x <- readTBMQueue q
+          case x of
+            Nothing -> return ()
+            Just _ -> go
+
+readAllFromQueue :: TQueue a -> STM [a]
+readAllFromQueue q = go []
+  where go xs = do
+          a <- tryReadTQueue q
+          case a of
+            Just v -> go (v:xs)
+            Nothing -> return xs
 
 replyToReq :: (MonadIO m) => Socket z Router -> ByteString -> ZMQT z m ()
 replyToReq sendSkt m =
