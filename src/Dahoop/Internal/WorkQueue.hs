@@ -7,6 +7,7 @@ module Dahoop.Internal.WorkQueue where
 import           Control.Applicative
 import Prelude hiding (all)
 import           Control.Concurrent.STM
+import Control.Monad.Trans.State
 import           Control.Lens
 import           Data.Foldable
 import qualified Data.Map               as M
@@ -27,6 +28,8 @@ newtype History = Repeats Int deriving (Eq, Show, Num, Enum)
 
 makeLenses ''Work
 
+type M i a m = StateT (Work i a) m
+
 buildWork :: Ord i => [(i, a)] -> STM (Work i a)
 buildWork ws = Work <$> initialQueue <*> newTVar initMap <*> pure (length ws)
   where initialQueue =
@@ -39,14 +42,14 @@ buildWork ws = Work <$> initialQueue <*> newTVar initMap <*> pure (length ws)
 -- | Start a work item, returns Nothing if we have nothing to do
 -- >>> atomically $ buildWork [] >>= start
 -- Nothing
--- >>> atomically $ buildWork [()] >>= start
--- Just (WorkId 1,Repeats 0,())
--- >>> atomically $ buildWork [()] >>= \w -> start w >> start w
--- Just (WorkId 1,Repeats 1,())
--- >>> atomically $ buildWork [(), ()] >>= \w -> start w >> start w
--- Just (WorkId 2,Repeats 0,())
--- >>> atomically $ buildWork [(), ()] >>= \w -> start w >> start w >> start w
--- Just (WorkId 1,Repeats 1,())
+-- >>> atomically $ buildWork [(1, ())] >>= start
+-- Just (1,Repeats 0,())
+-- >>> atomically $ buildWork [(1, ())] >>= \w -> start w >> start w
+-- Just (1,Repeats 1,())
+-- >>> atomically $ buildWork [(1, ()), (2, ())] >>= \w -> start w >> start w
+-- Just (2,Repeats 0,())
+-- >>> atomically $ buildWork [(1, ()), (2, ())] >>= \w -> start w >> start w >> start w
+-- Just (1,Repeats 1,())
 start :: Ord i => Work i a -> STM (Maybe (i, History, a))
 start w = do tryWork <- tryReadTQueue (_todo w)
              -- Completed items are not removed from the queue
@@ -62,12 +65,12 @@ start w = do tryWork <- tryReadTQueue (_todo w)
 -- | Complete a work item, returns the number of times this unit has been completed
 -- >>> atomically $ buildWork [] >>= complete 5
 -- 1
--- >>> atomically $ buildWork [()] >>= \w -> complete 1 w >> complete 1 w
+-- >>> atomically $ buildWork [(1, ())] >>= \w -> complete 1 w >> complete 1 w
 -- 2
 --
 -- Completing an item means it won't be started again
--- >>> atomically $ buildWork [(), (), ()] >>= \w -> complete 1 w >> complete 2 w >> start w
--- Just (WorkId 3,Repeats 0,())
+-- >>> atomically $ buildWork [(1, ()), (2, ()), (3, ())] >>= \w -> complete 1 w >> complete 2 w >> start w
+-- Just (3,Repeats 0,())
 complete :: Ord i => i -> Work i a -> STM Int
 complete wid w = do doned <- readTVar $ _done w
                     let next = succ . fromMaybe 0 $ doned ^. at wid
@@ -79,9 +82,9 @@ complete wid w = do doned <- readTVar $ _done w
 -- | Check is the work is all finished
 -- >>> atomically $ buildWork [] >>= isComplete
 -- True
--- >>> atomically $ buildWork [()] >>= isComplete
+-- >>> atomically $ buildWork [(1, ())] >>= isComplete
 -- False
--- >>> atomically $ buildWork [()] >>= \w -> complete 1 w >> isComplete w
+-- >>> atomically $ buildWork [(1, ())] >>= \w -> complete 1 w >> isComplete w
 -- True
 isComplete :: Work i a -> STM Bool
 isComplete w = do doned <- readTVar $ _done w

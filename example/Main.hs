@@ -31,7 +31,7 @@ main =
             exitFailure
 
 makeWorkUnits :: Int -> [(Int, IO Float)]
-makeWorkUnits n = zip [1..] $ replicate n (getStdRandom random)
+makeWorkUnits n = zip [1..] $ replicate n (threadDelay 500000 >> getStdRandom random)
 
 resultFold :: L.FoldM (ReaderT String IO) Float ()
 resultFold = L.FoldM saveFunc (return ()) (const (return ()))
@@ -51,23 +51,15 @@ masterHandler e = case e of
   D.SentPreload sid        -> liftIO $ putStrLn $ "Sent preload to: " ++ show sid
   D.RemoteEvent slaveid se -> liftIO $ print (slaveid, se)
 
-
 slaveHandler :: D.SlaveEventHandler Int
-slaveHandler e = case e of
-  D.AwaitingAnnouncement -> putStrLn "Waiting for job"
-  D.ReceivedAnnouncement a -> putStrLn $ "Received " ++ show a
-  D.StartedUnit a -> putStrLn $ "Started unit " ++ show a
-  D.FinishedUnit a -> putStrLn $ "Finished unit " ++ show a
-  D.FinishedJob units job ->
-    putStrLn ("Worked " ++ show units ++ " units of job " ++ show job)
-  D.ReceivedPreload ->
-    putStrLn "Preload arrived"
-  D.RequestingPreload -> putStrLn "Requesting payload"
-  D.WaitingForWorkReply -> putStrLn "Waiting for work reply"
+slaveHandler = print
 
 workerThread :: forall m. (MonadIO m) => D.WorkDetails m Float Float () -> m Float
 workerThread (D.WorkDetails preload a _) =
   do liftIO $ print a
-     delay <- liftIO $ randomRIO (1,4)
-     liftIO $ threadDelay (1000000 * delay)
+     liftIO $ randomDelay 1 4
      return (log a + preload)
+
+randomDelay n m = do
+     delay <- randomRIO (n,m)
+     threadDelay (1000000 * delay)

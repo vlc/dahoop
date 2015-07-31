@@ -41,6 +41,7 @@ library
                 , transformers
                 , uuid
                 , zeromq4-haskell
+                , time
                 , foldl
 
 executable example
