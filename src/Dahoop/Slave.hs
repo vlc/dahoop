@@ -14,6 +14,7 @@ import Control.Concurrent.Async hiding (async)
 import Control.Concurrent.STM
 import Control.Lens             ((^.))
 import Control.Monad            (forever)
+import Data.Time
 import Control.Monad.Trans
 import Control.Monad.Catch
 import Data.ByteString          (ByteString)
@@ -114,13 +115,15 @@ workLoop :: forall m a b c d i t t1 t2 z.
 workLoop slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
   where loop c =
           do send workIn [] $ encode (slaveid, jc)
+             t1 <- liftIO getCurrentTime
              sendDahoopLog WaitingForWorkReply
              input <- waitRead workIn >> receive workIn
              let Right n = runGet getWorkOrTerminate input -- HAHA, parsing never fails
              case n of
                Left z -> sendDahoopLog $ FinishedJob c z
                Right (wid, payload) ->
-                 do sendDahoopLog (StartedUnit wid)
+                 do t2 <- liftIO getCurrentTime
+                    sendDahoopLog (StartedUnit wid (realToFrac (diffUTCTime t2 t1)))
                     result <- f (WorkDetails preload payload sendUserLog)
                     send workOut [] . reply $ (slaveid, jc, wid, result)
                     sendDahoopLog (FinishedUnit wid)

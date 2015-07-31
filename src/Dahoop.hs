@@ -26,7 +26,7 @@ dahoop :: (Serialize a, Serialize b, Serialize c, Serialize r, MonadIO m, MonadM
           => MasterEventHandler m i c
           -> SlaveEventHandler i
           -> a
-          -> [(i, m b)]
+          -> [(i, IO b)]
           -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
           -> L.FoldM m r z
           -> (DistConfig -> m z,

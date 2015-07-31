@@ -13,7 +13,7 @@ runASingle :: (MonadIO m)
            => MasterEventHandler m i c
            -> SlaveEventHandler i
            -> a
-           -> [(i, m b)]
+           -> [(i, IO b)]
            -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
            -> L.FoldM m r z
            -> m z
@@ -42,11 +42,11 @@ runASingle mk sk preload workBuilders workFunction (L.FoldM step first extract) 
   initial <- first
 
   final <- foldM (\state (ix, action) -> do
-    work <- action
+    work <- liftIO action
     slaveRemoteLog WaitingForWorkReply
     masterLog (SentWork slaveId ix)
 
-    slaveRemoteLog $ StartedUnit ix
+    slaveRemoteLog $ StartedUnit ix 0
     result <- workFunction (WorkDetails preload work clientLog)
     slaveRemoteLog $ FinishedUnit ix
 
