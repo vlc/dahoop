@@ -1,37 +1,42 @@
+{-# LANGUAGE ConstraintKinds     #-}
+{-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RankNTypes          #-}
-{-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
-{-# LANGUAGE ConstraintKinds     #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 {-# OPTIONS_GHC -Werror #-}
 module Dahoop.Master (
   module Dahoop.Master
 ) where
 
-import Control.Concurrent       (threadDelay)
-import Control.Concurrent.Async (cancel, link)
-import qualified Control.Concurrent.Async as A (async, wait)
-import qualified Control.Foldl as L
-import Control.Lens             (makeLenses, (^.))
-import Control.Monad.State.Strict
-import Control.Monad.Catch
-import Control.Concurrent.STM
-import Control.Concurrent.STM.TBMQueue
-import Data.ByteString          (ByteString)
-import Data.List.NonEmpty       (NonEmpty ((:|)))
-import Data.Serialize           (runGet, encode, decode, Serialize)
-import Network.HostName
+import           Control.Concurrent              (threadDelay)
+import           Control.Concurrent.Async        (cancel, link)
+import qualified Control.Concurrent.Async        as A (async, wait)
+import           Control.Concurrent.STM
+import           Control.Concurrent.STM.TBMQueue
+import qualified Control.Foldl                   as L
+import           Control.Lens                    (makeLenses, (^.))
+import           Control.Monad.Catch
+import           Control.Monad.State.Strict
+import           Data.ByteString                 (ByteString)
+import           Data.List.NonEmpty              (NonEmpty ((:|)))
+import           Data.Serialize                  (Serialize, decode, encode,
+                                                  runGet)
 
-import System.ZMQ4.Monadic      (Pub (..), Pull (..), Sub (..), Receiver, Router (..), Sender, Poll (Sock), Event (In), poll)
-import Dahoop.ZMQ4.Trans        (ZMQT, Socket, receive, receiveMulti, runZMQT, liftZMQ, send, sendMulti, socket, subscribe, async)
-
-import qualified Dahoop.Internal.Messages  as M
-import           Dahoop.Internal.WorkQueue
 import           Dahoop.Event
+import qualified Dahoop.Internal.Messages        as M
+import           Dahoop.Internal.WorkQueue
 import           Dahoop.Utils
 import           Dahoop.ZMQ4
+import           Dahoop.ZMQ4.Trans               (Socket, ZMQT, async, liftZMQ,
+                                                  receive, receiveMulti,
+                                                  runZMQT, send, sendMulti,
+                                                  socket, subscribe)
+import           System.ZMQ4.Monadic             (Event (In), Poll (Sock),
+                                                  Pub (..), Pull (..), Receiver,
+                                                  Router (..), Sender, Sub (..),
+                                                  poll)
 
 -- TO DO
 -- * A heartbeat?
@@ -39,13 +44,14 @@ import           Dahoop.ZMQ4
 
 -- MASTER
 
-data DistConfig = DistConfig {
-                             _resultsPort     :: Int
-                             ,_askPort        :: Int
-                             ,_preloadPort    :: Int
-                             ,_loggingPort    :: Int
-                             ,_announcePort   :: Int
-                             }
+data DistConfig = DistConfig
+    { _masterAddress :: String
+    , _resultsPort :: Int
+    , _askPort :: Int
+    , _preloadPort :: Int
+    , _loggingPort :: Int
+    , _announcePort :: Int
+    }
 makeLenses ''DistConfig
 
 runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l, Ord i, Serialize i, MonadIO m, MonadMask m)
@@ -58,10 +64,9 @@ runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l, Ord i, Serial
 runAMaster k config preloadData work (L.FoldM step first extract) =
         runZMQT $ do jobCode <- liftIO M.generateJobCode
                      eventQueue <- atomicallyIO newTQueue
-                     h <- liftIO getHostName
                      sock <- liftZMQ $ socket Pub
                      bindM sock $ TCP Wildcard (config^.announcePort)
-                     announceThread <- liftZMQ $ async (announce sock (announcement config (DNS h) jobCode) eventQueue)
+                     announceThread <- liftZMQ $ async (announce sock (announcement config (DNS (config ^. masterAddress)) jobCode) eventQueue)
                      -- liftIO . link $ announceThread
                      (liftIO . link) =<< liftZMQ (async (preload (config ^. preloadPort) preloadData eventQueue))
                      lift $ k (Began jobCode)
@@ -210,7 +215,7 @@ waitForAllResults k rp jc work eventQueue workVar (first, step) =
                     -- the size of the slots increases on each preload request
                     -- and then increases again when work is received
                     -- an available slot goes away when it is filled
-                    
+
                     workItem <- action
                     atomicallyIO $ writeTBMQueue workVar $ (wid, M.work (wid, workItem)) -- should workItem be an async around action here?
                     populateWork
@@ -243,7 +248,7 @@ waitForAllResults k rp jc work eventQueue workVar (first, step) =
 -- | 0mq Utils
 
 hasReceivedMessage :: MonadIO m => Socket z t -> m Bool
-hasReceivedMessage s = 
+hasReceivedMessage s =
            do let recievedPoll = Sock s [In] Nothing
               events <- poll 0 [recievedPoll]
               return $! elem In $ head events

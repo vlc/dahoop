@@ -34,5 +34,5 @@ dahoop :: (Serialize a, Serialize b, Serialize c, Serialize r, MonadIO m, MonadM
               m z)
 dahoop mk sk pre workBuilders workFunction fold =
   (\distConfig -> runAMaster mk distConfig pre workBuilders fold,
-   \masterAddress -> liftIO $ runASlave sk workFunction masterAddress,
+   \ma -> liftIO $ runASlave sk workFunction ma,
    runASingle mk sk pre workBuilders workFunction fold)

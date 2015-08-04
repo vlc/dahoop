@@ -21,7 +21,7 @@ main =
      let preload = 1.1 :: Float
          secret = "BOO!"
      flip runReaderT secret $ case v of
-       ["master", numWorkUnits, port] -> let config = D.DistConfig 4001 4000 4002 4003 (read port)
+       ["master", numWorkUnits, port] -> let config = D.DistConfig "127.0.0.1" 4001 4000 4002 4003 (read port)
                           in D.runAMaster masterHandler config preload (fmap (fmap liftIO) $ makeWorkUnits $ read numWorkUnits) resultFold
        ["slave", numSlaves, port] -> liftIO $ do
           as <- replicateM (read numSlaves) $ async $ D.runASlave slaveHandler workerThread (D.TCP (D.IP4' 127 0 0 1) (read port))
