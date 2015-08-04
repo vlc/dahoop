@@ -23,7 +23,7 @@ import Dahoop.Single
 import Dahoop.ZMQ4
 
 dahoop :: (Serialize a, Serialize b, Serialize c, Serialize r, MonadIO m, MonadMask m, Serialize i, Ord i)
-          => MasterEventHandler m i c
+          => MasterEventHandler IO i c
           -> SlaveEventHandler i
           -> a
           -> [(i, IO b)]

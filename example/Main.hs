@@ -39,17 +39,17 @@ resultFold = L.FoldM saveFunc (return ()) (const (return ()))
           s <- ask
           lift (putStrLn $ "The result was " ++ show (f::Float) ++ " and the secret is " ++ s)
 
-masterHandler :: D.MasterEventHandler (ReaderT String IO) Int ()
+masterHandler :: D.MasterEventHandler IO Int ()
 masterHandler e = case e of
-  D.Announcing ann         -> liftIO $ putStrLn $ "Announcing " ++ show ann
-  D.Began n                -> liftIO $ putStrLn $ "Job #" ++ show n
-  D.WaitingForWorkRequest  -> liftIO $ putStrLn "Waiting for slave"
-  D.SentWork sid i         -> liftIO $ putStrLn $ "Sent work to: " ++ show sid ++ ", " ++ show i
-  D.ReceivedResult _ i _   -> liftIO $ putStrLn $ "Received " ++ show i
+  D.Announcing ann         -> putStrLn $ "Announcing " ++ show ann
+  D.Began n                -> putStrLn $ "Job #" ++ show n
+  D.WaitingForWorkRequest  -> putStrLn "Waiting for slave"
+  D.SentWork sid i         -> putStrLn $ "Sent work to: " ++ show sid ++ ", " ++ show i
+  D.ReceivedResult _ i _   -> putStrLn $ "Received " ++ show i
   D.SentTerminate _        -> return ()
-  D.Finished               -> liftIO $ putStrLn "Finished"
-  D.SentPreload sid        -> liftIO $ putStrLn $ "Sent preload to: " ++ show sid
-  D.RemoteEvent slaveid se -> liftIO $ print (slaveid, se)
+  D.Finished               -> putStrLn "Finished"
+  D.SentPreload sid        -> putStrLn $ "Sent preload to: " ++ show sid
+  D.RemoteEvent slaveid se -> print (slaveid, se)
 
 slaveHandler :: D.SlaveEventHandler Int
 slaveHandler = print
