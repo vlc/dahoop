@@ -220,10 +220,7 @@ waitForAllResults rp jc work eventQueue workVar (first, step) =
      workVarA <- liftIO $ A.async populateWork -- TODO, should possibly be linked to this thread?
 
      let loop =
-           do -- hasReceived <- lift $ hasReceivedMessage receiveSocket
-              result <- lift $ waitRead receiveSocket >> receive receiveSocket
-              -- when hasReceived $ do
-                -- result <- lift $ receive receiveSocket
+           do result <- lift $ waitRead receiveSocket >> receive receiveSocket
               let Right (slaveid, slaveJc, wid, stuff) = runGet M.getReply result
                 -- If a slave is sending work for the wrong job code,
                 -- it will be killed when it asks for the next bit of work
