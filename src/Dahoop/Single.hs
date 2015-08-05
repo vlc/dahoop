@@ -10,7 +10,7 @@ import           Dahoop.Event
 import           Dahoop.ZMQ4
 
 runASingle :: (MonadIO m)
-           => MasterEventHandler m i c
+           => MasterEventHandler IO i c
            -> SlaveEventHandler i
            -> a
            -> [(i, IO b)]
@@ -22,7 +22,7 @@ runASingle mk sk preload workBuilders workFunction (L.FoldM step first extract) 
   let slaveId = M.SlaveId "single" 1234
   let fakeAddress = TCP (IP4' 255 255 255 255) 1234
   let fakeAnnouncement = M.Announcement jobCode fakeAddress fakeAddress fakeAddress fakeAddress
-  let masterLog = mk
+  let masterLog = liftIO . mk
   let slaveLog = liftIO . sk
   let clientLog e = masterLog (RemoteEvent slaveId (UserEntry e))
   let slaveRemoteLog e = do
