@@ -136,7 +136,7 @@ theProcess' k sendPort jc rport logPort work eventQueue foldbits = do
     liftZMQ $
         do asyncLink (dealWork sendPort jc workVar eventQueue)
            asyncLink (receiveLogs logPort eventQueue)
-           asyncLink $ liftIO $ slurpTQueue eventQueue k
+           asyncLink $ liftIO $ forever $ slurpTQueue eventQueue k >> threadDelay 200000
     waitForAllResults rport jc work eventQueue workVar foldbits
 
 dealWork :: (MonadIO m, Serialize i) => Int -> M.JobCode -> TBMQueue (i, ByteString) -> TQueue (MasterEvent i l) -> ZMQT s m ()
