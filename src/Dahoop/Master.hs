@@ -10,11 +10,12 @@ module Dahoop.Master (
   module Dahoop.Master
 ) where
 
+import qualified Control.Concurrent.Chan.Unagi.Bounded as BC
+import qualified Control.Concurrent.Chan.Unagi as UC
+
 import           Control.Concurrent              (threadDelay)
 import           Control.Concurrent.Async        (cancel, link)
 import qualified Control.Concurrent.Async        as A (async, wait)
-import           Control.Concurrent.STM
-import           Control.Concurrent.STM.TBMQueue
 import qualified Control.Foldl                   as L
 import           Control.Lens                    (makeLenses, (^.))
 import           Control.Monad.Catch
@@ -63,7 +64,7 @@ runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l, Ord i, Serial
            -> m z
 runAMaster k config preloadData work (L.FoldM step first extract) =
         runZMQT $ do jobCode <- liftIO M.generateJobCode
-                     eventQueue <- atomicallyIO newTQueue
+                     eventQueue <- initEvents
                      sock <- liftZMQ $ socket Pub
                      bindM sock $ TCP Wildcard (config^.announcePort)
                      announceThread <- liftZMQ $ async (announce sock (announcement config (DNS (config ^. masterAddress)) jobCode) eventQueue)
@@ -90,27 +91,27 @@ announcement v ourHostname jc =
       (tcpHere (v ^. loggingPort))
   where tcpHere = TCP ourHostname
 
-announce :: (MonadIO m) => (Socket s Pub) -> M.Announcement -> TQueue (MasterEvent i l) -> ZMQT s m ()
+announce :: (MonadIO m) => (Socket s Pub) -> M.Announcement -> Events i l -> ZMQT s m ()
 announce announceSocket ann eventQueue =
   do -- 'Pub' sockets don't queue messages, they broadcast only to things
      -- that have connected.
      -- Need to give some time for the slave connections to complete
      liftIO (threadDelay 500000)
-     atomicallyIO $ writeTQueue eventQueue (Announcing ann)
+     writeEvent eventQueue (Announcing ann)
      forever $
        do
           (send announceSocket [] . M.announcement) ann
           -- we wait so that we don't spam more than necessary
           liftIO $ threadDelay 500000
 
-preload :: (MonadIO m, Serialize a) => Int -> a -> TQueue (MasterEvent i l) -> ZMQT s m ()
+preload :: (MonadIO m, Serialize a) => Int -> a -> Events i l -> ZMQT s m ()
 preload port preloadData eventQueue = do
   s <- returning (socket Router) (`bindM` TCP Wildcard port)
   let encoded = encode preloadData
   forever $ do
     (request, replyWith) <- replyarama s
     let Right slaveid = decode request :: Either String M.SlaveId
-    atomicallyIO $ writeTQueue eventQueue (SentPreload slaveid)
+    writeEvent eventQueue (SentPreload slaveid)
     replyWith encoded
 
 broadcastFinished :: (MonadIO m) => M.JobCode -> Socket z Pub -> ZMQT z m ()
@@ -128,7 +129,7 @@ theProcess' :: forall i m a l z x r.
             -> Int
             -> Int
             -> [(i, IO a)]
-            -> TQueue (MasterEvent i l)
+            -> Events i l
             -> (x, x -> r -> m x)
             -> ZMQT z m x
 theProcess' k sendPort jc rport logPort work eventQueue foldbits = do
@@ -136,10 +137,10 @@ theProcess' k sendPort jc rport logPort work eventQueue foldbits = do
     liftZMQ $
         do asyncLink (dealWork sendPort jc workVar eventQueue)
            asyncLink (receiveLogs logPort eventQueue)
-           asyncLink $ liftIO $ forever $ slurpTQueue eventQueue k >> threadDelay 200000
+           asyncLink $ lift $ slurpEvents eventQueue k
     waitForAllResults rport jc work eventQueue workVar foldbits
 
-dealWork :: (MonadIO m, Serialize i) => Int -> M.JobCode -> Outgoing i -> TQueue (MasterEvent i l) -> ZMQT s m ()
+dealWork :: (MonadIO m, Serialize i) => Int -> M.JobCode -> Outgoing i -> Events i l -> ZMQT s m ()
 dealWork port n workVar eventQueue =
   do sendSkt <- returning (socket Router)
                           (`bindM` TCP Wildcard port)
@@ -155,12 +156,12 @@ dealWork port n workVar eventQueue =
                 case item of
                   Just (wid, msg) -> do
                     -- if we've just started repeating, we could return
-                    -- the item to the queue (unGetTQueue), tell the client to hold tight
+                    -- the item to the queue, tell the client to hold tight
                     -- for a little while, sleep for a bit, then loop.
                     -- this would give time for recently received results to
                     -- get processed, and also give time for slightly slower slaves
                     -- to get their results in
-                    atomicallyIO $ writeTQueue eventQueue (SentWork slaveid wid)
+                    writeEvent eventQueue (SentWork slaveid wid)
                     replyWith msg
                     loop
                   Nothing ->
@@ -170,10 +171,10 @@ dealWork port n workVar eventQueue =
      forever $ do
        (request, replyWith) <- replyarama sendSkt
        let Right (slaveid, _) = decode request :: Either String (M.SlaveId, M.JobCode)
-       atomicallyIO (writeTQueue eventQueue (SentTerminate slaveid))
+       writeEvent eventQueue (SentTerminate slaveid)
        replyWith (M.terminate n)
 
-receiveLogs :: forall z m i l. (MonadIO m, Serialize i, Serialize l) => Int -> TQueue (MasterEvent i l) -> ZMQT z m ()
+receiveLogs :: forall z m i l. (MonadIO m, Serialize i, Serialize l) => Int -> Events i l -> ZMQT z m ()
 receiveLogs logPort eventQueue =
   do logSocket <- returning (socket Sub)
                             (`bindM` TCP Wildcard logPort)
@@ -181,14 +182,14 @@ receiveLogs logPort eventQueue =
      _ <- forever $
        do result <- receive logSocket
           let Right (slaveid, logEntry) = decode result :: Either String (M.SlaveId, SlaveLogEntry i l)
-          atomicallyIO $ writeTQueue eventQueue (RemoteEvent slaveid logEntry)
+          writeEvent eventQueue (RemoteEvent slaveid logEntry)
      return ()
 
 waitForAllResults :: (MonadIO m, Serialize r, Serialize i, Ord i, Serialize a)
                   => Int
                   -> M.JobCode
                   -> [(i, IO a)]
-                  -> TQueue (MasterEvent i l)
+                  -> Events i l
                   -> Outgoing i
                   -> (x, x -> r -> m x)
                   -> ZMQT z m x
@@ -227,7 +228,7 @@ waitForAllResults rp jc work eventQueue workVar (first, step) =
                     p <- atomicallyIO $ do
                         _ <- complete wid queue
                         progress queue
-                    atomicallyIO $ writeTQueue eventQueue (ReceivedResult slaveid wid p)
+                    writeEvent eventQueue (ReceivedResult slaveid wid p)
                     current <- get
                     v <- lift . lift $ step current stuff
                     put v
@@ -249,27 +250,6 @@ hasReceivedMessage s =
               events <- poll 0 [recievedPoll]
               return $! elem In $ head events
 
-slurpTQueue :: MonadIO m => TQueue a -> (a -> m ()) -> m ()
-slurpTQueue q f = do
-  events <- atomicallyIO $ readAllFromQueue q
-  mapM_ f events
-
-drainQueue :: TBMQueue a -> STM ()
-drainQueue q = go
-  where go = do
-          x <- readTBMQueue q
-          case x of
-            Nothing -> return ()
-            Just _ -> go
-
-readAllFromQueue :: TQueue a -> STM [a]
-readAllFromQueue q = go []
-  where go xs = do
-          a <- tryReadTQueue q
-          case a of
-            Just v -> go (v:xs)
-            Nothing -> return xs
-
 replyToReq :: (MonadIO m) => Socket z Router -> ByteString -> ZMQT z m ()
 replyToReq sendSkt m =
   do (_, replyWith) <- replyarama sendSkt
@@ -289,18 +269,84 @@ sendToReq skt peer msg =
 
 ---
 
-type Outgoing i = TBMQueue (i, ByteString)
+type Elem i = Maybe (i, ByteString)
+data Outgoing i = Outgoing (BC.InChan (Elem i)) (BC.OutChan (Elem i))
 
 nextOutgoing :: MonadIO m => Outgoing i -> m (Maybe (i, ByteString))
-nextOutgoing q = atomicallyIO $ readTBMQueue q
+nextOutgoing (Outgoing _ outs) = liftIO $ BC.readChan outs
 
 closeOutgoing :: MonadIO m => Outgoing i -> m ()
-closeOutgoing q = atomicallyIO $
-  do closeTBMQueue q
-     drainQueue q
+closeOutgoing (Outgoing ins _) = liftIO $ BC.writeChan ins Nothing
+                                    -- todo, also drain the chan
 
 writeOutgoing :: MonadIO m => Outgoing t -> t -> ByteString -> m ()
-writeOutgoing q wid item = atomicallyIO $ writeTBMQueue q (wid, item) -- should workItem be an async around action here?
+writeOutgoing (Outgoing ins _) wid item = liftIO $ BC.writeChan ins $ Just (wid, item) -- should workItem be an async around action here?
 
-initOutgoing n = atomicallyIO (newTBMQueue n)
+initOutgoing :: MonadIO m => Int -> m (Outgoing i)
+initOutgoing n = liftIO $ uncurry Outgoing <$> BC.newChan n
 
+
+data Events i l = Events (UC.InChan (MasterEvent i l)) (UC.OutChan (MasterEvent i l))
+
+-- writeEvent (Events ins _) k = writeChan ins k
+
+initEvents :: MonadIO m => m (Events i l)
+initEvents = liftIO $ uncurry Events <$> UC.newChan
+
+writeEvent :: MonadIO m => Events i l -> MasterEvent i l -> m ()
+writeEvent (Events ins _) = liftIO . UC.writeChan ins
+
+slurpEvents :: Events i l -> (MasterEvent i l -> IO a) -> IO ()
+slurpEvents (Events _ outs) f = forever $ do
+  v <- UC.readChan outs
+  _ <- f v
+  threadDelay 200000
+
+-- type Outgoing i = TBMQueue (i, ByteString)
+
+-- nextOutgoing :: MonadIO m => Outgoing i -> m (Maybe (i, ByteString))
+-- nextOutgoing q = atomicallyIO $ readTBMQueue q
+
+-- closeOutgoing :: MonadIO m => Outgoing i -> m ()
+-- closeOutgoing q = atomicallyIO $
+--   do closeTBMQueue q
+--      drainQueue q
+
+-- writeOutgoing :: MonadIO m => Outgoing t -> t -> ByteString -> m ()
+-- writeOutgoing q wid item = atomicallyIO $ writeTBMQueue q (wid, item) -- should workItem be an async around action here?
+
+-- initOutgoing n = atomicallyIO (newTBMQueue n)
+
+-- type Events i l = TQueue (MasterEvent i l)
+
+-- initEvents :: MonadIO m => m (Events i l)
+-- initEvents = atomicallyIO newTQueue
+
+-- writeEvent :: MonadIO m => Events i l -> MasterEvent i l -> m ()
+-- writeEvent q k = atomicallyIO $ writeTQueue q k
+
+-- slurpEvents :: Events i l -> (MasterEvent i l -> IO a) -> IO ()
+-- slurpEvents q f =
+--   do forever $ slurpTQueue q f >> threadDelay 200000
+
+
+-- slurpTQueue :: MonadIO m => TQueue a -> (a -> m x) -> m ()
+-- slurpTQueue q f = do
+--   events <- atomicallyIO $ readAllFromQueue q
+--   mapM_ f events
+
+-- readAllFromQueue :: TQueue a -> STM [a]
+-- readAllFromQueue q = go []
+--   where go xs = do
+--           a <- tryReadTQueue q
+--           case a of
+--             Just v -> go (v:xs)
+--             Nothing -> return xs
+
+-- drainQueue :: TBMQueue a -> STM ()
+-- drainQueue q = go
+--   where go = do
+--           x <- readTBMQueue q
+--           case x of
+--             Nothing -> return ()
+--             Just _ -> go

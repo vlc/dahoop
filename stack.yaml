@@ -4,3 +4,5 @@ resolver: nightly-2015-06-30
 flags: {}
 packages:
 - '.'
+extra-deps:
+- unagi-chan-0.4.0.0

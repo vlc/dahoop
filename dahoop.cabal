@@ -44,6 +44,7 @@ library
                 , zeromq4-haskell
                 , time
                 , foldl
+                , unagi-chan
 
 executable example
   main-is:             Main.hs
