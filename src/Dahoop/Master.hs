@@ -132,14 +132,14 @@ theProcess' :: forall i m a l z x r.
             -> (x, x -> r -> m x)
             -> ZMQT z m x
 theProcess' k sendPort jc rport logPort work eventQueue foldbits = do
-    workVar <- atomicallyIO (newTBMQueue 64)
+    workVar <- initOutgoing 64
     liftZMQ $
         do asyncLink (dealWork sendPort jc workVar eventQueue)
            asyncLink (receiveLogs logPort eventQueue)
            asyncLink $ liftIO $ forever $ slurpTQueue eventQueue k >> threadDelay 200000
     waitForAllResults rport jc work eventQueue workVar foldbits
 
-dealWork :: (MonadIO m, Serialize i) => Int -> M.JobCode -> TBMQueue (i, ByteString) -> TQueue (MasterEvent i l) -> ZMQT s m ()
+dealWork :: (MonadIO m, Serialize i) => Int -> M.JobCode -> Outgoing i -> TQueue (MasterEvent i l) -> ZMQT s m ()
 dealWork port n workVar eventQueue =
   do sendSkt <- returning (socket Router)
                           (`bindM` TCP Wildcard port)
@@ -151,7 +151,7 @@ dealWork port n workVar eventQueue =
                 loop
               else do
                 -- I don't think the workVar is really needed, the worqueue could just be taken from directly
-                item <- atomicallyIO $ readTBMQueue workVar
+                item <- nextOutgoing workVar
                 case item of
                   Just (wid, msg) -> do
                     -- if we've just started repeating, we could return
@@ -189,7 +189,7 @@ waitForAllResults :: (MonadIO m, Serialize r, Serialize i, Ord i, Serialize a)
                   -> M.JobCode
                   -> [(i, IO a)]
                   -> TQueue (MasterEvent i l)
-                  -> TBMQueue (i, ByteString)
+                  -> Outgoing i
                   -> (x, x -> r -> m x)
                   -> ZMQT z m x
 waitForAllResults rp jc work eventQueue workVar (first, step) =
@@ -200,9 +200,7 @@ waitForAllResults rp jc work eventQueue workVar (first, step) =
        populateWork = do
                 next  <- atomicallyIO $ start queue
                 case next of
-                  Nothing -> atomicallyIO $ do
-                    closeTBMQueue workVar -- I think this should read all items off of the queue to make it empty
-                    drainQueue workVar
+                  Nothing -> closeOutgoing workVar
                   Just (wid, _, action) -> do
 
                     -- I think this can be spawned into a thread.
@@ -215,7 +213,7 @@ waitForAllResults rp jc work eventQueue workVar (first, step) =
                     -- and then increases again when work is received
                     -- an available slot goes away when it is filled
                     workItem <- action
-                    atomicallyIO $ writeTBMQueue workVar $ (wid, M.work (wid, workItem)) -- should workItem be an async around action here?
+                    writeOutgoing workVar wid (M.work (wid, workItem))
                     populateWork
 
      workVarA <- liftIO $ A.async populateWork -- TODO, should possibly be linked to this thread?
@@ -287,3 +285,22 @@ sendToReq skt peer msg =
   sendMulti skt
             (peer :|
              ["", msg])
+
+
+---
+
+type Outgoing i = TBMQueue (i, ByteString)
+
+nextOutgoing :: MonadIO m => Outgoing i -> m (Maybe (i, ByteString))
+nextOutgoing q = atomicallyIO $ readTBMQueue q
+
+closeOutgoing :: MonadIO m => Outgoing i -> m ()
+closeOutgoing q = atomicallyIO $
+  do closeTBMQueue q
+     drainQueue q
+
+writeOutgoing :: MonadIO m => Outgoing t -> t -> ByteString -> m ()
+writeOutgoing q wid item = atomicallyIO $ writeTBMQueue q (wid, item) -- should workItem be an async around action here?
+
+initOutgoing n = atomicallyIO (newTBMQueue n)
+
