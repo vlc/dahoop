@@ -3,7 +3,6 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell     #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 {-# OPTIONS_GHC -Werror #-}
 module Dahoop.Master (
@@ -17,7 +16,7 @@ import           Control.Concurrent              (threadDelay)
 import           Control.Concurrent.Async        (cancel, link)
 import qualified Control.Concurrent.Async        as A (async, wait)
 import qualified Control.Foldl                   as L
-import           Control.Lens                    (makeLenses, (^.))
+import           Control.Lens
 import           Control.Monad.Catch
 import           Control.Monad.State.Strict
 import           Data.ByteString                 (ByteString)
@@ -53,7 +52,24 @@ data DistConfig = DistConfig
     , _loggingPort :: Int
     , _announcePort :: Int
     }
-makeLenses ''DistConfig
+
+masterAddress :: Simple Lens DistConfig String
+masterAddress = lens _masterAddress (\v s -> v { _masterAddress = s})
+
+resultsPort :: Simple Lens DistConfig Int
+resultsPort = lens _resultsPort (\v s -> v { _resultsPort = s})
+
+askPort :: Simple Lens DistConfig Int
+askPort = lens _askPort (\v s -> v { _askPort = s})
+
+preloadPort :: Simple Lens DistConfig Int
+preloadPort = lens _preloadPort (\v s -> v { _preloadPort = s})
+
+loggingPort :: Simple Lens DistConfig Int
+loggingPort = lens _loggingPort (\v s -> v { _loggingPort = s})
+
+announcePort :: Simple Lens DistConfig Int
+announcePort = lens _announcePort (\v s -> v { _announcePort = s})
 
 runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l, Ord i, Serialize i, MonadIO m, MonadMask m)
            => MasterEventHandler IO i l

@@ -1,6 +1,5 @@
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TupleSections              #-}
 module Dahoop.Internal.WorkQueue where
 
@@ -26,7 +25,6 @@ data Work i a =
 -- The state that a work item transition
 newtype History = Repeats Int deriving (Eq, Show, Num, Enum)
 
-makeLenses ''Work
 
 type M i a m = StateT (Work i a) m
 
@@ -93,4 +91,4 @@ isComplete w = do doned <- readTVar $ _done w
 
 progress :: Work i a -> STM Float
 progress w = do donecount <- fmap M.size $ readTVar $ _done w
-                return (fromIntegral donecount / fromIntegral (w ^. size))
+                return (fromIntegral donecount / fromIntegral (_size w))
