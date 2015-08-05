@@ -106,11 +106,12 @@ announce announceSocket ann eventQueue =
 preload :: (MonadIO m, Serialize a) => Int -> a -> TQueue (MasterEvent i l) -> ZMQT s m ()
 preload port preloadData eventQueue = do
   s <- returning (socket Router) (`bindM` TCP Wildcard port)
+  let encoded = encode preloadData
   forever $ do
     (request, replyWith) <- replyarama s
     let Right slaveid = decode request :: Either String M.SlaveId
     atomicallyIO $ writeTQueue eventQueue (SentPreload slaveid)
-    replyWith (encode preloadData)
+    replyWith encoded
 
 broadcastFinished :: (MonadIO m) => M.JobCode -> Socket z Pub -> ZMQT z m ()
 broadcastFinished n announceSocket =
