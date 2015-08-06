@@ -230,7 +230,8 @@ waitForAllResults rp jc work eventQueue workVar (first, step) =
                     -- and then increases again when work is received
                     -- an available slot goes away when it is filled
                     workItem <- action
-                    writeOutgoing workVar wid (M.work (wid, workItem))
+                    let encoded = M.work (wid, workItem)
+                    writeOutgoing workVar wid $! encoded
                     populateWork
 
      workVarA <- liftIO $ A.async populateWork -- TODO, should possibly be linked to this thread?
