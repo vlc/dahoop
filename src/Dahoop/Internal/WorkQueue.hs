@@ -60,22 +60,22 @@ start w = do tryWork <- tryReadTQueue (_todo w)
                             then start w
                             else writeTQueue (_todo w) (t & _2 %~ succ) >> return (Just t)
 
--- | Complete a work item, returns the number of times this unit has been completed
+-- | Complete a work item, returns the whether it was previously complete
 -- >>> atomically $ buildWork [] >>= complete 5
--- 1
+-- True
 -- >>> atomically $ buildWork [(1, ())] >>= \w -> complete 1 w >> complete 1 w
--- 2
+-- False
 --
 -- Completing an item means it won't be started again
 -- >>> atomically $ buildWork [(1, ()), (2, ()), (3, ())] >>= \w -> complete 1 w >> complete 2 w >> start w
 -- Just (3,Repeats 0,())
-complete :: Ord i => i -> Work i a -> STM Int
+complete :: Ord i => i -> Work i a -> STM Bool
 complete wid w = do doned <- readTVar $ _done w
                     let next = succ . fromMaybe 0 $ doned ^. at wid
                     -- We cannot remove items from a TQueue, so we track what is done here
                     -- and skip done items in `start`
                     writeTVar (_done w) $ doned & at wid .~ Just next
-                    return next
+                    return (next == 1)
 
 -- | Check is the work is all finished
 -- >>> atomically $ buildWork [] >>= isComplete
