@@ -2,7 +2,12 @@ extra-deps: []
 arch: x86_64
 flags: {}
 packages:
-- '.'
+  - '.'
+  - location:
+      git: https://github.com/nkpart/haskell-lockfree.git
+      commit: HEAD
+    subdirs:
+      - atomic-primops
 extra-deps:
 - unagi-chan-0.4.0.0
 resolver:
