@@ -242,13 +242,13 @@ waitForAllResults rp jc work eventQueue workVar (first, step) =
                 -- If a slave is sending work for the wrong job code,
                 -- it will be killed when it asks for the next bit of work
               when (jc == slaveJc) $ do
-                    p <- atomicallyIO $ do
-                        _ <- complete wid queue
-                        progress queue
+                    (isNew, p) <- atomicallyIO $ do
+                        (,) <$> complete wid queue <*> progress queue
                     writeEvent eventQueue (ReceivedResult slaveid wid p)
-                    current <- get
-                    v <- lift . lift $ step current stuff
-                    put v
+                    when isNew $ do
+                        current <- get
+                        v <- lift . lift $ step current stuff
+                        put v
               -- What if this happened on a different thread?
               completed <- atomicallyIO $ isComplete queue
               unless completed loop
