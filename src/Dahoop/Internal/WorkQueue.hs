@@ -4,13 +4,13 @@
 module Dahoop.Internal.WorkQueue where
 
 import           Control.Applicative
-import Prelude hiding (all)
 import           Control.Concurrent.STM
-import Control.Monad.Trans.State
 import           Control.Lens
+import           Control.Monad.Trans.State
 import           Data.Foldable
-import qualified Data.Map               as M
-import           Data.Maybe             (fromMaybe)
+import qualified Data.Map                  as M
+import           Data.Maybe                (fromMaybe)
+import           Prelude                   hiding (all)
 
 -- $setup
 -- >>> import Test.QuickCheck
@@ -89,6 +89,15 @@ isComplete w = do doned <- readTVar $ _done w
                   return $ all (> 0) doned
   -- we are done if all keys in the map are >0
 
+-- |
+-- >>> atomically $ buildWork [(1, ())] >>= progress
+-- 0.0
+-- >>> atomically $ buildWork [(1, ()), (2, ())] >>= \w -> complete 1 w >> progress w
+-- 0.5
+-- >>> atomically $ buildWork [(1, ()), (2, ())] >>= \w -> complete 1 w >> complete 2 w >> progress w
+-- 1.0
 progress :: Work i a -> STM Float
-progress w = do donecount <- fmap M.size $ readTVar $ _done w
-                return (fromIntegral donecount / fromIntegral (_size w))
+progress w = do
+  x <- readTVar (_done w)
+  let donecount = lengthOf (traverse . filtered (>0)) x
+  return (fromIntegral donecount / fromIntegral (_size w))
