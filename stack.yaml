@@ -4,8 +4,8 @@ flags: {}
 packages:
   - '.'
   - location:
-      git: https://github.com/nkpart/haskell-lockfree.git
-      commit: HEAD
+      git: https://github.com/rrnewton/haskell-lockfree.git
+      commit: b85656e01de995c2654e4f2babc8cb6a56e6544b
     subdirs:
       - atomic-primops
 extra-deps:
