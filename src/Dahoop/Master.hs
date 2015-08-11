@@ -317,7 +317,7 @@ slurpEvents :: Events i l -> (MasterEvent i l -> IO a) -> IO ()
 slurpEvents (Events _ outs) f = forever $ do
   v <- UC.readChan outs
   _ <- f v
-  threadDelay 200000
+  return ()
 
 -- type Outgoing i = TBMQueue (i, ByteString)
 
