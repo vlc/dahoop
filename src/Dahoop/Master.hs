@@ -40,7 +40,6 @@ import           System.ZMQ4.Monadic             (Event (In), Poll (Sock),
 
 -- TO DO
 -- * A heartbeat?
--- * UUID for job codes
 
 -- MASTER
 
@@ -134,7 +133,6 @@ broadcastFinished :: (MonadIO m) => M.JobCode -> Socket z Pub -> ZMQT z m ()
 broadcastFinished n announceSocket =
   do liftIO (threadDelay 500000)
      (send announceSocket [] . M.finishUp) n
-
 
 -- NOTE: Send and receive must be done using different sockets, as they are used in different threads
 theProcess' :: forall i m a l z x r.
