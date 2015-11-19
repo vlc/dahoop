@@ -1,6 +1,7 @@
 {-# LANGUAGE ConstraintKinds     #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
@@ -70,28 +71,38 @@ loggingPort = lens _loggingPort (\v s -> v { _loggingPort = s})
 announcePort :: Simple Lens DistConfig Int
 announcePort = lens _announcePort (\v s -> v { _announcePort = s})
 
+type Job i b = (i, IO b)
+
 runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l, Ord i, Serialize i, MonadIO m, MonadMask m)
            => MasterEventHandler IO i l
            -> DistConfig
            -> a
-           -> [(i, IO b)]
+           -> [Job i b]
            -> L.FoldM m r z
            -> m z
 runAMaster k config preloadData work (L.FoldM step first extract) =
         runZMQT $ do jobCode <- liftIO M.generateJobCode
                      eventQueue <- initEvents
+
+                     -- setup
+                     liftIO $ k (Began jobCode)
                      sock <- liftZMQ $ socket Pub
                      bindM sock $ TCP Wildcard (config^.announcePort)
                      announceThread <- liftZMQ $ async (announce sock (announcement config (DNS (config ^. masterAddress)) jobCode) eventQueue)
-                     -- liftIO . link $ announceThread
                      (liftIO . link) =<< liftZMQ (async (preload (config ^. preloadPort) preloadData eventQueue))
-                     liftIO $ k (Began jobCode)
+
+                     -- the work
                      initial <- lift first
                      result <- theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) (config ^. loggingPort) work eventQueue (initial, step)
+
+                     -- shutdown
                      liftIO (cancel announceThread)
                      broadcastFinished jobCode sock
                      liftIO $ k Finished
-                     lift $ extract result
+
+                     -- post shutdown extract
+                     lift $ extract result -- this must be ZMQT m z
+
 
 announcement :: DistConfig
                 -> Connect
@@ -217,7 +228,6 @@ waitForAllResults rp jc work eventQueue workVar (first, step) =
                 case next of
                   Nothing -> closeOutgoing workVar
                   Just (wid, _, action) -> do
-
                     -- I think this can be spawned into a thread.
                     -- Every time we receive a result, we spawn the next bit of enqueuing
                     -- Actually in theory we should probably be one step ahead? so we wait less?
