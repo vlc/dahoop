@@ -77,7 +77,7 @@ runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l, Ord i, Serial
            => MasterEventHandler IO i l
            -> DistConfig
            -> a
-           -> [Job i b]
+           -> NonEmpty (Job i b)
            -> L.FoldM m r z
            -> m z
 runAMaster k config preloadData work (L.FoldM step first extract) =
@@ -153,7 +153,7 @@ theProcess' :: forall i m a l z x r.
             -> M.JobCode
             -> Int
             -> Int
-            -> [(i, IO a)]
+            -> NonEmpty (Job i a)
             -> Events i l
             -> (x, x -> r -> m x)
             -> ZMQT z m x
@@ -213,7 +213,7 @@ receiveLogs logPort eventQueue =
 waitForAllResults :: (MonadIO m, Serialize r, Serialize i, Ord i, Serialize a)
                   => Int
                   -> M.JobCode
-                  -> [(i, IO a)]
+                  -> NonEmpty (Job i a)
                   -> Events i l
                   -> Outgoing i
                   -> (x, x -> r -> m x)
