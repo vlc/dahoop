@@ -8,6 +8,7 @@ module Main where
 import Control.Monad.Reader
 import Control.Concurrent     (threadDelay)
 import Control.Concurrent.Async
+import Data.List.NonEmpty     hiding (zip)
 import System.Environment     (getArgs)
 import System.Exit            (exitFailure)
 import System.Random
@@ -30,8 +31,8 @@ main =
          do putStrLn "USAGE: $0 [slave NUM_WORKERS MASTER_PORT | master NUM_WORK_UNITS PORT]"
             exitFailure
 
-makeWorkUnits :: Int -> [(Int, IO Float)]
-makeWorkUnits n = zip [1..] $ replicate n (threadDelay 500000 >> getStdRandom random)
+makeWorkUnits :: Int -> NonEmpty (Int, IO Float)
+makeWorkUnits n = fromList . zip [1..] $ replicate n (threadDelay 500000 >> getStdRandom random)
 
 resultFold :: L.FoldM (ReaderT String IO) Float ()
 resultFold = L.FoldM saveFunc (return ()) (const (return ()))
