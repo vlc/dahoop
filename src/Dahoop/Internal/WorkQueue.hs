@@ -7,10 +7,11 @@ import           Control.Applicative
 import           Control.Concurrent.STM
 import           Control.Lens
 import           Control.Monad.Trans.State
-import           Data.Foldable
+import           Data.Foldable             hiding (length, toList)
+import           Data.List.NonEmpty
 import qualified Data.Map                  as M
 import           Data.Maybe                (fromMaybe)
-import           Prelude                   hiding (all)
+import           Prelude                   hiding (all, length)
 
 -- $setup
 -- >>> import Test.QuickCheck
@@ -28,7 +29,7 @@ newtype History = Repeats Int deriving (Eq, Show, Num, Enum)
 
 type M i a m = StateT (Work i a) m
 
-buildWork :: Ord i => [(i, a)] -> STM (Work i a)
+buildWork :: Ord i => NonEmpty (i, a) -> STM (Work i a)
 buildWork ws = Work <$> initialQueue <*> newTVar initMap <*> pure (length ws)
   where initialQueue =
           do q <- newTQueue
