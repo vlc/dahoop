@@ -4,7 +4,7 @@ module Dahoop.Single where
 import qualified Control.Foldl as L
 import Control.Monad (foldM)
 import Control.Monad.IO.Class
-import Data.List.NonEmpty
+import Data.List.NonEmpty (NonEmpty)
 
 import qualified Dahoop.Internal.Messages  as M
 import           Dahoop.Event

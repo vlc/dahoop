@@ -24,8 +24,7 @@ main =
      flip runReaderT secret $ case v of
        ["master", numWorkUnits, port] ->
          let config = D.DistConfig "127.0.0.1" 4001 4000 4002 4003 (read port)
-             workUnits = makeWorkUnits (read numWorkUnits)
-          in case workUnits of
+          in case makeWorkUnits (read numWorkUnits) of
              Nothing -> liftIO $ putStrLn "Must have at least one work unit" >> exitFailure
              Just ws -> D.runAMaster masterHandler config preload (fmap (fmap liftIO) $ ws) resultFold
        ["slave", numSlaves, port] -> liftIO $ do
