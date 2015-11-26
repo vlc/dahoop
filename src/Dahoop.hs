@@ -14,6 +14,7 @@ module Dahoop (
 import Control.Monad.IO.Class
 import Control.Monad.Catch
 import qualified Control.Foldl as L
+import Data.List.NonEmpty
 import Data.Serialize
 
 import Dahoop.Event
@@ -26,7 +27,7 @@ dahoop :: (Serialize a, Serialize b, Serialize c, Serialize r, MonadIO m, MonadM
           => MasterEventHandler IO i c
           -> SlaveEventHandler i
           -> a
-          -> [(i, IO b)]
+          -> NonEmpty (Job i b)
           -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
           -> L.FoldM m r z
           -> (DistConfig -> m z,

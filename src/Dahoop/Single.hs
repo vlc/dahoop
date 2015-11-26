@@ -4,6 +4,7 @@ module Dahoop.Single where
 import qualified Control.Foldl as L
 import Control.Monad (foldM)
 import Control.Monad.IO.Class
+import Data.List.NonEmpty (NonEmpty)
 
 import qualified Dahoop.Internal.Messages  as M
 import           Dahoop.Event
@@ -13,7 +14,7 @@ runASingle :: (MonadIO m)
            => MasterEventHandler IO i c
            -> SlaveEventHandler i
            -> a
-           -> [(i, IO b)]
+           -> NonEmpty (i, IO b)
            -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
            -> L.FoldM m r z
            -> m z
