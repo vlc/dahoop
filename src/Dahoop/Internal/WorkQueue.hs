@@ -15,6 +15,8 @@ import           Prelude                   hiding (all)
 
 -- $setup
 -- >>> import Test.QuickCheck
+-- >>> import Data.List.NonEmpty
+-- >>> let buildWork1 a b = buildWork (a :| b)
 
 -- | Out work queue
 data Work i a =
@@ -25,7 +27,6 @@ data Work i a =
 
 -- The state that a work item transition
 newtype History = Repeats Int deriving (Eq, Show, Num, Enum)
-
 
 type M i a m = StateT (Work i a) m
 
@@ -39,15 +40,13 @@ buildWork ws = Work <$> initialQueue <*> newTVar initMap <*> pure (NE.length ws)
         idWork = ws -- zip (map WorkId [1..]) ws
 
 -- | Start a work item, returns Nothing if we have nothing to do
--- >>> atomically $ buildWork [] >>= start
--- Nothing
--- >>> atomically $ buildWork [(1, ())] >>= start
+-- >>> atomically $ buildWork1 (1, ()) [] >>= start
 -- Just (1,Repeats 0,())
--- >>> atomically $ buildWork [(1, ())] >>= \w -> start w >> start w
+-- >>> atomically $ buildWork1 (1, ()) [] >>= \w -> start w >> start w
 -- Just (1,Repeats 1,())
--- >>> atomically $ buildWork [(1, ()), (2, ())] >>= \w -> start w >> start w
+-- >>> atomically $ buildWork1 (1, ()) [(2, ())] >>= \w -> start w >> start w
 -- Just (2,Repeats 0,())
--- >>> atomically $ buildWork [(1, ()), (2, ())] >>= \w -> start w >> start w >> start w
+-- >>> atomically $ buildWork1 (1, ()) [(2, ())] >>= \w -> start w >> start w >> start w
 -- Just (1,Repeats 1,())
 start :: Ord i => Work i a -> STM (Maybe (i, History, a))
 start w = do tryWork <- tryReadTQueue (_todo w)
@@ -62,13 +61,11 @@ start w = do tryWork <- tryReadTQueue (_todo w)
                             else writeTQueue (_todo w) (t & _2 %~ succ) >> return (Just t)
 
 -- | Complete a work item, returns the whether it was previously complete
--- >>> atomically $ buildWork [] >>= complete 5
--- True
--- >>> atomically $ buildWork [(1, ())] >>= \w -> complete 1 w >> complete 1 w
+-- >>> atomically $ buildWork1 (1, ()) [] >>= \w -> complete 1 w >> complete 1 w
 -- False
 --
 -- Completing an item means it won't be started again
--- >>> atomically $ buildWork [(1, ()), (2, ()), (3, ())] >>= \w -> complete 1 w >> complete 2 w >> start w
+-- >>> atomically $ buildWork1 (1, ()) [(2, ()), (3, ())] >>= \w -> complete 1 w >> complete 2 w >> start w
 -- Just (3,Repeats 0,())
 complete :: Ord i => i -> Work i a -> STM Bool
 complete wid w = do doned <- readTVar $ _done w
@@ -78,12 +75,20 @@ complete wid w = do doned <- readTVar $ _done w
                     writeTVar (_done w) $ doned & at wid .~ Just next
                     return (next == 1)
 
--- | Check is the work is all finished
--- >>> atomically $ buildWork [] >>= isComplete
--- True
--- >>> atomically $ buildWork [(1, ())] >>= isComplete
+-- | Check if a single item is complete
+-- >>> atomically $ buildWork1 (1, ()) [] >>= \w -> itemIsComplete 1 w
 -- False
--- >>> atomically $ buildWork [(1, ())] >>= \w -> complete 1 w >> isComplete w
+-- >>> atomically $ buildWork1 (1, ()) [] >>= \w -> complete 1 w >> itemIsComplete 1 w
+-- True
+itemIsComplete :: Ord i => i -> Work i a -> STM Bool
+itemIsComplete i w =
+  do dones <- readTVar $ _done w
+     return $ maybe False (>0) (M.lookup i dones)
+
+-- | Check is the work is all finished
+-- >>> atomically $ buildWork1 (1, ()) [] >>= isComplete
+-- False
+-- >>> atomically $ buildWork1 (1, ()) [] >>= \w -> complete 1 w >> isComplete w
 -- True
 isComplete :: Work i a -> STM Bool
 isComplete w = do doned <- readTVar $ _done w
@@ -91,11 +96,9 @@ isComplete w = do doned <- readTVar $ _done w
   -- we are done if all keys in the map are >0
 
 -- |
--- >>> atomically $ buildWork [(1, ())] >>= progress
--- 0.0
--- >>> atomically $ buildWork [(1, ()), (2, ())] >>= \w -> complete 1 w >> progress w
+-- >>> atomically $ buildWork1 (1, ()) [(2, ())] >>= \w -> complete 1 w >> progress w
 -- 0.5
--- >>> atomically $ buildWork [(1, ()), (2, ())] >>= \w -> complete 1 w >> complete 2 w >> progress w
+-- >>> atomically $ buildWork1 (1, ()) [(2, ())] >>= \w -> complete 1 w >> complete 2 w >> progress w
 -- 1.0
 progress :: Work i a -> STM Float
 progress w = do

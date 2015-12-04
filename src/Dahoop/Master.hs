@@ -1,43 +1,44 @@
 {-# LANGUAGE ConstraintKinds     #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell     #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 {-# OPTIONS_GHC -Werror #-}
 module Dahoop.Master (
   module Dahoop.Master
 ) where
 
+import qualified Control.Concurrent.Chan.Unagi         as UC
 import qualified Control.Concurrent.Chan.Unagi.Bounded as BC
-import qualified Control.Concurrent.Chan.Unagi as UC
 
-import           Control.Concurrent              (threadDelay)
-import           Control.Concurrent.Async        (cancel, link)
-import qualified Control.Concurrent.Async        as A (async, wait)
-import qualified Control.Foldl                   as L
+import           Control.Concurrent                    (threadDelay)
+import           Control.Concurrent.Async              (cancel, link)
+import qualified Control.Concurrent.Async              as A (async, wait)
+import qualified Control.Foldl                         as L
 import           Control.Lens
 import           Control.Monad.Catch
 import           Control.Monad.State.Strict
-import           Data.ByteString                 (ByteString)
-import           Data.List.NonEmpty              (NonEmpty ((:|)))
-import           Data.Serialize                  (Serialize, decode, encode,
-                                                  runGet)
+import           Data.ByteString                       (ByteString)
+import           Data.List.NonEmpty                    (NonEmpty ((:|)))
+import           Data.Serialize                        (Serialize, decode,
+                                                        encode, runGet)
 
 import           Dahoop.Event
-import qualified Dahoop.Internal.Messages        as M
+import qualified Dahoop.Internal.Messages              as M
 import           Dahoop.Internal.WorkQueue
 import           Dahoop.Utils
 import           Dahoop.ZMQ4
-import           Dahoop.ZMQ4.Trans               (Socket, ZMQT, async, liftZMQ,
-                                                  receive, receiveMulti,
-                                                  runZMQT, send, sendMulti,
-                                                  socket, subscribe, waitRead)
-import           System.ZMQ4.Monadic             (Event (In), Poll (Sock),
-                                                  Pub (..), Pull (..), Receiver,
-                                                  Router (..), Sender, Sub (..),
-                                                  poll)
+import           Dahoop.ZMQ4.Trans                     (Socket, ZMQT, async,
+                                                        liftZMQ, receive,
+                                                        receiveMulti, runZMQT,
+                                                        send, sendMulti, socket,
+                                                        subscribe, waitRead)
+import           System.ZMQ4.Monadic                   (Event (In), Poll (Sock),
+                                                        Pub (..), Pull (..),
+                                                        Receiver, Router (..),
+                                                        Sender, Sub (..), poll)
 
 -- TO DO
 -- * A heartbeat?
@@ -158,15 +159,16 @@ theProcess' :: forall i m a l z x r.
             -> (x, x -> r -> m x)
             -> ZMQT z m x
 theProcess' k sendPort jc rport logPort work eventQueue foldbits = do
-    workVar <- initOutgoing 64
+    workVar <- initOutgoing 1
+    queue <- atomicallyIO $ buildWork work
     liftZMQ $
-        do asyncLink (dealWork sendPort jc workVar eventQueue)
+        do asyncLink (dealWork sendPort jc workVar eventQueue queue)
            asyncLink (receiveLogs logPort eventQueue)
            asyncLink $ lift $ slurpEvents eventQueue k
-    waitForAllResults rport jc work eventQueue workVar foldbits
+    waitForAllResults rport jc queue eventQueue workVar foldbits
 
-dealWork :: (MonadIO m, Serialize i) => Int -> M.JobCode -> Outgoing i -> Events i l -> ZMQT s m ()
-dealWork port n workVar eventQueue =
+dealWork :: (Ord i, MonadIO m) => Int -> M.JobCode -> Outgoing i -> Events i l -> Work i a -> ZMQT z m b
+dealWork port n workVar eventQueue work =
   do sendSkt <- returning (socket Router)
                           (`bindM` TCP Wildcard port)
      let loop =
@@ -175,22 +177,25 @@ dealWork port n workVar eventQueue =
               if slaveJc /= n then do
                 replyWith (M.terminate slaveJc)
                 loop
-              else do
-                -- I don't think the workVar is really needed, the worqueue could just be taken from directly
-                item <- nextOutgoing workVar
-                case item of
-                  Just (wid, msg) -> do
-                    -- if we've just started repeating, we could return
-                    -- the item to the queue, tell the client to hold tight
-                    -- for a little while, sleep for a bit, then loop.
-                    -- this would give time for recently received results to
-                    -- get processed, and also give time for slightly slower slaves
-                    -- to get their results in
-                    writeEvent eventQueue (SentWork slaveid wid)
-                    replyWith msg
-                    loop
-                  Nothing ->
-                    replyWith (M.terminate n)
+              else do let findAndDoNextNotYetDone = do
+                            item <- nextOutgoing workVar
+                            case item of
+                              Just (wid, msg) -> do
+                                alreadyDone <- atomicallyIO (itemIsComplete wid work)
+                                if alreadyDone
+                                  then findAndDoNextNotYetDone
+                                  -- if we've just started repeating, we could return
+                                  -- the item to the queue, tell the client to hold tight
+                                  -- for a little while, sleep for a bit, then loop.
+                                  -- this would give time for recently received results to
+                                  -- get processed, and also give time for slightly slower slaves
+                                  -- to get their results in
+                                  else do writeEvent eventQueue (SentWork slaveid wid)
+                                          replyWith msg
+                                          loop
+                              Nothing ->
+                                replyWith (M.terminate n)
+                      findAndDoNextNotYetDone
      loop
 
      forever $ do
@@ -210,17 +215,9 @@ receiveLogs logPort eventQueue =
           writeEvent eventQueue (RemoteEvent slaveid logEntry)
      return ()
 
-waitForAllResults :: (MonadIO m, Serialize r, Serialize i, Ord i, Serialize a)
-                  => Int
-                  -> M.JobCode
-                  -> NonEmpty (Job i a)
-                  -> Events i l
-                  -> Outgoing i
-                  -> (x, x -> r -> m x)
-                  -> ZMQT z m x
-waitForAllResults rp jc work eventQueue workVar (first, step) =
+waitForAllResults :: (Ord t1, MonadIO m, Serialize t, Serialize t1, Serialize t2) => Int -> M.JobCode -> Work t1 (IO t) -> Events t1 l -> Outgoing t1 -> (s, s -> t2 -> m s) -> ZMQT z m s
+waitForAllResults rp jc queue eventQueue workVar (first, step) =
   do receiveSocket <- returning (socket Pull) (`bindM` TCP Wildcard rp)
-     queue <- atomicallyIO $ buildWork work
      let
        populateWork :: IO ()
        populateWork = do
