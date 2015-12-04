@@ -20,13 +20,13 @@ runASingle :: (MonadIO m)
            -> m z
 runASingle mk sk preload workBuilders workFunction (L.FoldM step first extract) = do
   jobCode <- liftIO M.generateJobCode
-  let slaveId = M.SlaveId "single" 1234
-  let fakeAddress = TCP (IP4' 255 255 255 255) 1234
-  let fakeAnnouncement = M.Announcement jobCode fakeAddress fakeAddress fakeAddress fakeAddress
-  let masterLog = liftIO . mk
-  let slaveLog = liftIO . sk
-  let clientLog e = masterLog (RemoteEvent slaveId (UserEntry e))
-  let slaveRemoteLog e = do
+  let slaveId = M.SlaveId "single"
+      fakeAddress = TCP (IP4' 255 255 255 255) 1234
+      fakeAnnouncement = M.Announcement jobCode fakeAddress fakeAddress fakeAddress fakeAddress
+      masterLog = liftIO . mk
+      slaveLog = liftIO . sk
+      clientLog e = masterLog (RemoteEvent slaveId (UserEntry e))
+      slaveRemoteLog e = do
         masterLog (RemoteEvent slaveId (DahoopEntry e))
         slaveLog e
 

@@ -28,9 +28,7 @@ instance Serialize UUID where
     put uuid = case toWords uuid of (w0, w1, w2, w3) -> putWord32be w0 >> putWord32be w1 >> putWord32be w2 >> putWord32be w3
     get = fromWords <$> getWord32be <*> getWord32be <*> getWord32be <*> getWord32be
 
-data SlaveId = SlaveId { slaveHostName :: HostName,
-                         slavePort     :: Int
-                       } deriving (Eq, Show, Generic)
+data SlaveId = SlaveId { slaveHostName :: HostName } deriving (Eq, Show, Generic)
 
 instance Serialize SlaveId
 

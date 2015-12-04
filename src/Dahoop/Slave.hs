@@ -48,7 +48,7 @@ runASlave k workFunction s =
   forever $ runZMQ (do (v,queue) <- announcementsQueue s
                        ann <- waitForAnnouncement k queue
                        h   <- liftIO getHostName
-                       let slaveid = SlaveId h (-1) -- TODO Nick slave id
+                       let slaveid = SlaveId h
                        Right (preload :: c) <- decode <$> requestPreload slaveid k (ann ^. preloadAddress)
                        worker <- async (do workIn  <- returning (socket Req)  (`connectM` (ann ^. askAddress))
                                            workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
@@ -128,7 +128,7 @@ workLoop slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
                     send workOut [] . reply $ (slaveid, jc, wid, result)
                     sendDahoopLog (FinishedUnit wid)
                     loop (succ c)
-        sendDahoopLog e = liftIO (k e) >> send logOut [] (encode $ (slaveid, (DahoopEntry e :: SlaveLogEntry i c)))
+        sendDahoopLog e = liftIO (k e) >> send logOut [] (encode (slaveid, (DahoopEntry e :: SlaveLogEntry i c)))
         sendUserLog   e = send logOut [] (encode (slaveid, UserEntry e :: SlaveLogEntry i c))
 
 monitorUntilStopped :: Socket z t -> (Maybe EventMsg -> ZMQ z a) -> ZMQ z (Async (Maybe EventMsg))
