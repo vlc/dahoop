@@ -3,12 +3,8 @@ arch: x86_64
 flags: {}
 packages:
   - '.'
-  - location:
-      git: https://github.com/rrnewton/haskell-lockfree.git
-      commit: b85656e01de995c2654e4f2babc8cb6a56e6544b
-    subdirs:
-      - atomic-primops
 extra-deps:
 - unagi-chan-0.4.0.0
+- atomic-primops-0.8.0.2
 resolver:
-  nightly-2015-08-06
+  lts-3.13
