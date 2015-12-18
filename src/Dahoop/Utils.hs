@@ -22,12 +22,3 @@ class (Ord (Id j), Serialize (Input j), Serialize (Result j), Serialize (Log j),
   type Result j
   type Log j
   type Id j
-
-data DreddJob
-
-instance DahoopTask DreddJob where
-  type Preload DreddJob = [Int]
-  type Input DreddJob = Float
-  type Result DreddJob = Char
-  type Log DreddJob = String
-  type Id DreddJob = Int
