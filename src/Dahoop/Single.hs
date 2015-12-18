@@ -1,4 +1,5 @@
 {-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE TypeFamilies                #-}
 module Dahoop.Single where
 
 import qualified Control.Foldl as L
@@ -9,16 +10,18 @@ import Data.List.NonEmpty (NonEmpty)
 import qualified Dahoop.Internal.Messages  as M
 import           Dahoop.Event
 import           Dahoop.ZMQ4
+import Dahoop.Utils
 
-runASingle :: (MonadIO m)
-           => MasterEventHandler IO i c
-           -> SlaveEventHandler i
-           -> a
-           -> NonEmpty (i, IO b)
-           -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
-           -> L.FoldM m (i, r) z
+runASingle :: (MonadIO m, DahoopTask j)
+           => j
+           -> MasterEventHandler IO (Id j) (Log j)
+           -> SlaveEventHandler (Id j)
+           -> Preload j
+           -> NonEmpty (Id j, IO (Input j))
+           -> (forall n. (MonadIO n) => WorkDetails n (Preload j) (Input j) (Log j) -> n (Result j))
+           -> L.FoldM m (Id j, Result j) z
            -> m z
-runASingle mk sk preload workBuilders workFunction (L.FoldM step first extract) = do
+runASingle _ mk sk preload workBuilders workFunction (L.FoldM step first extract) = do
   jobCode <- liftIO M.generateJobCode
   let slaveId = M.SlaveId "single"
       fakeAddress = TCP (IP4' 255 255 255 255) 1234
