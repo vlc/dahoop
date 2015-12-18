@@ -1,4 +1,6 @@
 {-# LANGUAGE ConstraintKinds     #-}
+{-# LANGUAGE TypeFamilies     #-}
+{-# LANGUAGE AllowAmbiguousTypes     #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RankNTypes          #-}
@@ -22,8 +24,7 @@ import           Control.Monad.Catch
 import           Control.Monad.State.Strict
 import           Data.ByteString                       (ByteString)
 import           Data.List.NonEmpty                    (NonEmpty ((:|)))
-import           Data.Serialize                        (Serialize, decode,
-                                                        encode, runGet)
+import           Data.Serialize                        (decode, encode, runGet)
 
 import           Dahoop.Event
 import qualified Dahoop.Internal.Messages              as M
@@ -74,14 +75,17 @@ announcePort = lens _announcePort (\v s -> v { _announcePort = s})
 
 type Job i b = (i, IO b)
 
-runAMaster :: (Serialize a, Serialize b, Serialize r, Serialize l, Ord i, Serialize i, MonadIO m, MonadMask m)
-           => MasterEventHandler IO i l
+  -- (f x == f y) => (x == y)
+
+runAMaster :: forall j m z. (DahoopTask j, MonadIO m, MonadMask m)
+           => j
+           -> MasterEventHandler IO (Id j) (Log j)
            -> DistConfig
-           -> a
-           -> NonEmpty (Job i b)
-           -> L.FoldM m r z
+           -> Preload j
+           -> NonEmpty (Job (Id j) (Input j))
+           -> L.FoldM m (Id j, Result j) z
            -> m z
-runAMaster k config preloadData work (L.FoldM step first extract) =
+runAMaster _ k config preloadData work (L.FoldM step first extract) =
         runZMQT $ do jobCode <- liftIO M.generateJobCode
                      eventQueue <- initEvents
 
@@ -90,11 +94,11 @@ runAMaster k config preloadData work (L.FoldM step first extract) =
                      sock <- liftZMQ $ socket Pub
                      bindM sock $ TCP Wildcard (config^.announcePort)
                      announceThread <- liftZMQ $ async (announce sock (announcement config (DNS (config ^. masterAddress)) jobCode) eventQueue)
-                     (liftIO . link) =<< liftZMQ (async (preload (config ^. preloadPort) preloadData eventQueue))
+                     (liftIO . link) =<< liftZMQ (async (preload (undefined :: j) (config ^. preloadPort) preloadData eventQueue))
 
                      -- the work
                      initial <- lift first
-                     result <- theProcess' k (config ^. askPort) jobCode (config ^. resultsPort) (config ^. loggingPort) work eventQueue (initial, step)
+                     result <- theProcess' (undefined :: j) k (config ^. askPort) jobCode (config ^. resultsPort) (config ^. loggingPort) work eventQueue (initial, step)
 
                      -- shutdown
                      liftIO (cancel announceThread)
@@ -103,7 +107,6 @@ runAMaster k config preloadData work (L.FoldM step first extract) =
 
                      -- post shutdown extract
                      lift $ extract result -- this must be ZMQT m z
-
 
 announcement :: DistConfig
                 -> Connect
@@ -118,7 +121,7 @@ announcement v ourHostname jc =
       (tcpHere (v ^. loggingPort))
   where tcpHere = TCP ourHostname
 
-announce :: (MonadIO m) => (Socket s Pub) -> M.Announcement -> Events i l -> ZMQT s m ()
+announce :: (MonadIO m) => Socket s Pub -> M.Announcement -> Events i l -> ZMQT s m ()
 announce announceSocket ann eventQueue =
   do -- 'Pub' sockets don't queue messages, they broadcast only to things
      -- that have connected.
@@ -131,8 +134,8 @@ announce announceSocket ann eventQueue =
           -- we wait so that we don't spam more than necessary
           liftIO $ threadDelay 500000
 
-preload :: (MonadIO m, Serialize a) => Int -> a -> Events i l -> ZMQT s m ()
-preload port preloadData eventQueue = do
+preload :: (DahoopTask t, MonadIO m) => t -> Int -> Preload t -> Events (Id t) (Log t)-> ZMQT s m ()
+preload _ port preloadData eventQueue = do
   s <- returning (socket Router) (`bindM` TCP Wildcard port)
   let encoded = encode preloadData
   forever $ do
@@ -147,28 +150,35 @@ broadcastFinished n announceSocket =
      (send announceSocket [] . M.finishUp) n
 
 -- NOTE: Send and receive must be done using different sockets, as they are used in different threads
-theProcess' :: forall i m a l z x r.
-               (Ord i, MonadIO m, Serialize a, Serialize l, Serialize r, Serialize i)
-            => MasterEventHandler IO i l
+theProcess' :: forall t m x z. (MonadIO m, DahoopTask t)
+            => t
+            -> MasterEventHandler IO (Id t) (Log t)
             -> Int
             -> M.JobCode
             -> Int
             -> Int
-            -> NonEmpty (Job i a)
-            -> Events i l
-            -> (x, x -> r -> m x)
+            -> NonEmpty (Job (Id t) (Input t))
+            -> Events (Id t) (Log t)
+            -> (x, x -> (Id t , Result t) -> m x)
             -> ZMQT z m x
-theProcess' k sendPort jc rport logPort work eventQueue foldbits = do
+theProcess' _ k sendPort jc rport logPort work eventQueue foldbits = do
     workVar <- initOutgoing 1
     queue <- atomicallyIO $ buildWork work
     liftZMQ $
-        do asyncLink (dealWork sendPort jc workVar eventQueue queue)
-           asyncLink (receiveLogs logPort eventQueue)
+        do asyncLink (dealWork (undefined :: t) sendPort jc workVar eventQueue queue)
+           asyncLink (receiveLogs (undefined :: t) logPort eventQueue)
            asyncLink $ lift $ slurpEvents eventQueue k
-    waitForAllResults rport jc queue eventQueue workVar foldbits
+    waitForAllResults (undefined :: t) rport jc queue eventQueue workVar foldbits
 
-dealWork :: (Ord i, MonadIO m) => Int -> M.JobCode -> Outgoing i -> Events i l -> Work i a -> ZMQT z m b
-dealWork port n workVar eventQueue work =
+dealWork :: (DahoopTask t,MonadIO m)
+         => t
+         -> Int
+         -> M.JobCode
+         -> Outgoing (Id t)
+         -> Events (Id t) (Log t)
+         -> Work (Id t) (IO (Input t))
+         -> ZMQT z m (Result t)
+dealWork _ port n workVar eventQueue work =
   do sendSkt <- returning (socket Router)
                           (`bindM` TCP Wildcard port)
      let loop =
@@ -204,19 +214,27 @@ dealWork port n workVar eventQueue work =
        writeEvent eventQueue (SentTerminate slaveid)
        replyWith (M.terminate n)
 
-receiveLogs :: forall z m i l. (MonadIO m, Serialize i, Serialize l) => Int -> Events i l -> ZMQT z m ()
-receiveLogs logPort eventQueue =
+receiveLogs :: forall z m t. (MonadIO m, DahoopTask t) => t -> Int -> Events (Id t) (Log t) -> ZMQT z m ()
+receiveLogs _ logPort eventQueue =
   do logSocket <- returning (socket Sub)
                             (`bindM` TCP Wildcard logPort)
      subscribe logSocket "" -- Subscribe to every incoming message
      _ <- forever $
        do result <- receive logSocket
-          let Right (slaveid, logEntry) = decode result :: Either String (M.SlaveId, SlaveLogEntry i l)
+          let Right (slaveid, logEntry) = decode result :: Either String (M.SlaveId, SlaveLogEntry (Id t) (Log t))
           writeEvent eventQueue (RemoteEvent slaveid logEntry)
      return ()
 
-waitForAllResults :: (Ord t1, MonadIO m, Serialize t, Serialize t1, Serialize t2) => Int -> M.JobCode -> Work t1 (IO t) -> Events t1 l -> Outgoing t1 -> (s, s -> t2 -> m s) -> ZMQT z m s
-waitForAllResults rp jc queue eventQueue workVar (first, step) =
+waitForAllResults :: (MonadIO m, DahoopTask t)
+                  => t
+                  -> Int
+                  -> M.JobCode
+                  -> Work (Id t) (IO (Input t))
+                  -> Events (Id t) (Log t)
+                  -> Outgoing (Id t)
+                  -> (s,s -> (Id t, Result t) -> m s)
+                  -> ZMQT z m s
+waitForAllResults _ rp jc queue eventQueue workVar (first, step) =
   do receiveSocket <- returning (socket Pull) (`bindM` TCP Wildcard rp)
      let
        populateWork :: IO ()
@@ -247,12 +265,12 @@ waitForAllResults rp jc queue eventQueue workVar (first, step) =
                 -- If a slave is sending work for the wrong job code,
                 -- it will be killed when it asks for the next bit of work
               when (jc == slaveJc) $ do
-                    (isNew, p) <- atomicallyIO $ do
+                    (isNew, p) <- atomicallyIO $
                         (,) <$> complete wid queue <*> progress queue
                     writeEvent eventQueue (ReceivedResult slaveid wid p)
                     when isNew $ do
                         current <- get
-                        v <- lift . lift $ step current stuff
+                        v <- lift . lift $ step current (wid, stuff)
                         put v
               -- What if this happened on a different thread?
               completed <- atomicallyIO $ isComplete queue
@@ -287,7 +305,6 @@ sendToReq skt peer msg =
   sendMulti skt
             (peer :|
              ["", msg])
-
 
 ---
 

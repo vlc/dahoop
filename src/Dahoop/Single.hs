@@ -16,7 +16,7 @@ runASingle :: (MonadIO m)
            -> a
            -> NonEmpty (i, IO b)
            -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
-           -> L.FoldM m r z
+           -> L.FoldM m (i, r) z
            -> m z
 runASingle mk sk preload workBuilders workFunction (L.FoldM step first extract) = do
   jobCode <- liftIO M.generateJobCode
@@ -53,7 +53,7 @@ runASingle mk sk preload workBuilders workFunction (L.FoldM step first extract) 
 
     masterLog (ReceivedResult slaveId ix 0.0) -- TODO fake out actual percent complete?
 
-    step state result
+    step state (ix, result)
    ) initial workBuilders
 
   masterLog (SentTerminate slaveId)

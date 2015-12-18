@@ -1,10 +1,12 @@
 {-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE ScopedTypeVariables                #-}
 module Dahoop (
   dahoop,
   Dahoop.Master.runAMaster,
   Dahoop.Slave.runASlave,
   Dahoop.Single.runASingle,
   module Dahoop.Event,
+  DahoopTask(..),
   Dahoop.Master.DistConfig(..),
   Dahoop.ZMQ4.Address(..),
   Dahoop.ZMQ4.Connect(..),
@@ -15,25 +17,24 @@ import Control.Monad.IO.Class
 import Control.Monad.Catch
 import qualified Control.Foldl as L
 import Data.List.NonEmpty
-import Data.Serialize
 
 import Dahoop.Event
 import Dahoop.Slave
 import Dahoop.Master
 import Dahoop.Single
 import Dahoop.ZMQ4
+import Dahoop.Utils
 
-dahoop :: (Serialize a, Serialize b, Serialize c, Serialize r, MonadIO m, MonadMask m, Serialize i, Ord i)
-          => MasterEventHandler IO i c
-          -> SlaveEventHandler i
-          -> a
-          -> NonEmpty (Job i b)
-          -> (forall n. (MonadIO n) => WorkDetails n a b c -> n r)
-          -> L.FoldM m r z
-          -> (DistConfig -> m z,
-              Address Connect -> m (),
-              m z)
-dahoop mk sk pre workBuilders workFunction fold =
-  (\distConfig -> runAMaster mk distConfig pre workBuilders fold,
-   \ma -> liftIO $ runASlave sk workFunction ma,
+dahoop :: (DahoopTask j,MonadIO m,MonadMask m)
+       => j
+       -> MasterEventHandler IO (Id j) (Log j)
+       -> SlaveEventHandler (Id j)
+       -> Preload j
+       -> NonEmpty (Job (Id j) (Input j))
+       -> (forall n. (MonadIO n) => WorkDetails n (Preload j) (Input j) (Log j) -> n (Result j))
+       -> L.FoldM m (Id j,Result j) z
+       -> (DistConfig -> m z,Address Connect -> m (),m z)
+dahoop x mk sk pre workBuilders workFunction fold =
+  (\distConfig -> runAMaster x mk distConfig pre workBuilders fold,
+   \ma -> liftIO $ runASlave x sk workFunction ma,
    runASingle mk sk pre workBuilders workFunction fold)
