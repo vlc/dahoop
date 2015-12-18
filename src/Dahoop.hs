@@ -37,4 +37,4 @@ dahoop :: (DahoopTask j,MonadIO m,MonadMask m)
 dahoop x mk sk pre workBuilders workFunction fold =
   (\distConfig -> runAMaster x mk distConfig pre workBuilders fold,
    \ma -> liftIO $ runASlave x sk workFunction ma,
-   runASingle mk sk pre workBuilders workFunction fold)
+   runASingle x mk sk pre workBuilders workFunction fold)
