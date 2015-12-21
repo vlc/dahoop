@@ -1,5 +1,4 @@
 {-# LANGUAGE DeriveGeneric   #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Dahoop.Internal.Messages
        (terminate, work, getWorkOrTerminate, Announcement(..), reply,
@@ -8,7 +7,7 @@ module Dahoop.Internal.Messages
         getAnnouncementOrFinishUp, loggingAddress, SlaveId(..))
        where
 
-import Control.Lens        (makeLenses)
+import Control.Lens
 import Data.ByteString     (ByteString)
 import Data.Serialize      (Get, Serialize, encode, get, getWord32be, put, putWord32be, runPut)
 import Data.UUID           (UUID, fromWords, toWords)
@@ -29,9 +28,7 @@ instance Serialize UUID where
     put uuid = case toWords uuid of (w0, w1, w2, w3) -> putWord32be w0 >> putWord32be w1 >> putWord32be w2 >> putWord32be w3
     get = fromWords <$> getWord32be <*> getWord32be <*> getWord32be <*> getWord32be
 
-data SlaveId = SlaveId { slaveHostName :: HostName,
-                         slavePort     :: Int
-                       } deriving (Eq, Show, Generic)
+data SlaveId = SlaveId { slaveHostName :: HostName } deriving (Eq, Show, Generic)
 
 instance Serialize SlaveId
 
@@ -78,6 +75,19 @@ data Announcement = Announcement {
   _loggingAddress :: Address Connect
   } deriving (Generic, Eq, Show)
 
-makeLenses ''Announcement
+annJobCode :: Simple Lens Announcement JobCode
+annJobCode = lens _annJobCode (\v s -> v { _annJobCode = s})
+
+resultsAddress :: Simple Lens Announcement (Address Connect)
+resultsAddress = lens _resultsAddress (\v s -> v { _resultsAddress = s})
+
+askAddress :: Simple Lens Announcement (Address Connect)
+askAddress = lens _askAddress (\v s -> v { _askAddress = s})
+
+preloadAddress :: Simple Lens Announcement (Address Connect)
+preloadAddress = lens _preloadAddress (\v s -> v { _preloadAddress = s})
+                 
+loggingAddress :: Simple Lens Announcement (Address Connect)
+loggingAddress = lens _loggingAddress (\v s -> v { _loggingAddress = s})
 
 instance Serialize Announcement

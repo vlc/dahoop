@@ -14,6 +14,7 @@ import Control.Concurrent.Async hiding (async)
 import Control.Concurrent.STM
 import Control.Lens             ((^.))
 import Control.Monad            (forever)
+import Data.Time
 import Control.Monad.Trans
 import Control.Monad.Catch
 import Data.ByteString          (ByteString)
@@ -47,7 +48,7 @@ runASlave k workFunction s =
   forever $ runZMQ (do (v,queue) <- announcementsQueue s
                        ann <- waitForAnnouncement k queue
                        h   <- liftIO getHostName
-                       let slaveid = SlaveId h (-1) -- TODO Nick slave id
+                       let slaveid = SlaveId h
                        Right (preload :: c) <- decode <$> requestPreload slaveid k (ann ^. preloadAddress)
                        worker <- async (do workIn  <- returning (socket Req)  (`connectM` (ann ^. askAddress))
                                            workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
@@ -114,18 +115,20 @@ workLoop :: forall m a b c d i t t1 t2 z.
 workLoop slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
   where loop c =
           do send workIn [] $ encode (slaveid, jc)
+             t1 <- liftIO getCurrentTime
              sendDahoopLog WaitingForWorkReply
              input <- waitRead workIn >> receive workIn
              let Right n = runGet getWorkOrTerminate input -- HAHA, parsing never fails
              case n of
                Left z -> sendDahoopLog $ FinishedJob c z
                Right (wid, payload) ->
-                 do sendDahoopLog (StartedUnit wid)
+                 do t2 <- liftIO getCurrentTime
+                    sendDahoopLog (StartedUnit wid (realToFrac (diffUTCTime t2 t1)))
                     result <- f (WorkDetails preload payload sendUserLog)
                     send workOut [] . reply $ (slaveid, jc, wid, result)
                     sendDahoopLog (FinishedUnit wid)
                     loop (succ c)
-        sendDahoopLog e = liftIO (k e) >> send logOut [] (encode $ (slaveid, (DahoopEntry e :: SlaveLogEntry i c)))
+        sendDahoopLog e = liftIO (k e) >> send logOut [] (encode (slaveid, (DahoopEntry e :: SlaveLogEntry i c)))
         sendUserLog   e = send logOut [] (encode (slaveid, UserEntry e :: SlaveLogEntry i c))
 
 monitorUntilStopped :: Socket z t -> (Maybe EventMsg -> ZMQ z a) -> ZMQ z (Async (Maybe EventMsg))

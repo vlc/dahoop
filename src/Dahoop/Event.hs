@@ -23,7 +23,7 @@ data SlaveEvent i
   | RequestingPreload
   | ReceivedPreload
   | WaitingForWorkReply
-  | StartedUnit i
+  | StartedUnit i Float
   | FinishedUnit i
   | FinishedJob Int JobCode deriving (Eq, Show, Generic)
 
