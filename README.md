@@ -17,3 +17,11 @@ export CPPFLAGS=-DFD_SETSIZE=1024
 export CFLAGS=-DFD_SETSIZE=1024
 ./configure && make
 # get the dll out of src/.libs
+
+Install ZeroMQ for OSX
+---
+
+- brew install zeromq
+- brew link --overwrite zeromq
+- stack --extra-lib-dirs `brew --prefix zeromq`/lib --extra-include-dirs `brew --prefix zeromq`/include  install zeromq4-haskell-0.6.3 
+
