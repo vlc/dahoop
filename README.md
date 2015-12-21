@@ -22,6 +22,6 @@ Install ZeroMQ for OSX
 ---
 
 - brew install zeromq
-- brew link --overwrite zeromq
+- brew link --overwrite zeromq (if there is a problem with the next line)
 - stack --extra-lib-dirs `brew --prefix zeromq`/lib --extra-include-dirs `brew --prefix zeromq`/include  install zeromq4-haskell-0.6.3 
 
