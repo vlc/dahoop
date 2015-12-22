@@ -18,7 +18,7 @@ import Data.Time
 import Control.Monad.Trans
 import Control.Monad.Catch
 import Data.ByteString          (ByteString)
-import Data.Serialize           (runGet, encode, decode)
+import Data.Serialize           (Serialize, runGet, encode, decode)
 import Network.HostName
 import System.ZMQ4.Monadic      (EventMsg (MonitorStopped), EventType (AllEvents), Pub (Pub), Push (Push), Receiver, Req (Req),
                                  Sender, Sub (Sub))
@@ -42,22 +42,18 @@ import Dahoop.ZMQ4
 -- any async tasks that are expected to run forever (in the context of a job) need to be
 -- explicitly cancelled
 
-runASlave :: forall j. DahoopTask j
-          => j
-          -> SlaveEventHandler (Id j)
-          -> (forall m. (MonadIO m) => WorkDetails m (Preload j) (Input j) (Log j) -> m (Result j))
-          -> Address Connect
-          -> IO ()
-runASlave x k workFunction s =
+runASlave :: (Serialize i, Serialize a, Serialize b, Serialize c, Serialize d)
+          => SlaveEventHandler i -> (forall m. (MonadIO m) => WorkDetails m a b c -> m d) -> Address Connect -> IO ()
+runASlave k workFunction s =
   forever $ runZMQ (do (v,queue) <- announcementsQueue s
                        ann <- waitForAnnouncement k queue
                        h   <- liftIO getHostName
                        let slaveid = SlaveId h
-                       Right (preload :: Preload j) <- decode <$> requestPreload slaveid k (ann ^. preloadAddress)
+                       Right (preload :: c) <- decode <$> requestPreload slaveid k (ann ^. preloadAddress)
                        worker <- async (do workIn  <- returning (socket Req)  (`connectM` (ann ^. askAddress))
                                            workOut <- returning (socket Push) (`connectM` (ann ^. resultsAddress))
                                            logOut  <- returning (socket Pub)  (`connectM` (ann ^. loggingAddress))
-                                           workLoop x slaveid (ann ^. annJobCode) k workIn workOut logOut preload workFunction)
+                                           workLoop slaveid (ann ^. annJobCode) k workIn workOut logOut preload workFunction)
                        waiter <- async (liftIO . waitForDone queue $ ann ^. annJobCode)
                        liftIO $ do _ <- waitAnyCancel [worker,waiter,v]
                                    -- If we don't threadDelay here, STM exceptions happen when we loop
@@ -103,21 +99,20 @@ requestPreload slaveid k port =
      receive s <*
        liftIO (k ReceivedPreload)
 
-workLoop :: forall m j t t1 t2 z.
+workLoop :: forall m a b c d i t t1 t2 z.
             (MonadIO m, MonadMask m,
-             DahoopTask j,
+             Serialize i, Serialize a, Serialize b, Serialize c, Serialize d,
              Receiver t, Sender t1, Sender t, Sender t2)
-            => j
-            -> SlaveId
+            => SlaveId
             -> JobCode
-            -> SlaveEventHandler (Id j)
+            -> SlaveEventHandler i
             -> Socket z t
             -> Socket z t1
             -> Socket z t2
-            -> Preload j
-            -> (forall n. (MonadIO n) => WorkDetails n (Preload j) (Input j) (Log j) -> n (Result j))
+            -> a
+            -> (forall n. (MonadIO n) => WorkDetails n a b c -> n d)
             -> ZMQT z m ()
-workLoop _ slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
+workLoop slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
   where loop c =
           do send workIn [] $ encode (slaveid, jc)
              t1 <- liftIO getCurrentTime
@@ -133,8 +128,8 @@ workLoop _ slaveid jc k workIn workOut logOut preload f = loop (0 :: Int)
                     send workOut [] . reply $ (slaveid, jc, wid, result)
                     sendDahoopLog (FinishedUnit wid)
                     loop (succ c)
-        sendDahoopLog e = liftIO (k e) >> send logOut [] (encode (slaveid, DahoopEntry e :: SlaveLogEntry (Id j) (Log j)))
-        sendUserLog   e = send logOut [] (encode (slaveid, UserEntry e :: SlaveLogEntry (Id j) (Log j)))
+        sendDahoopLog e = liftIO (k e) >> send logOut [] (encode (slaveid, (DahoopEntry e :: SlaveLogEntry i c)))
+        sendUserLog   e = send logOut [] (encode (slaveid, UserEntry e :: SlaveLogEntry i c))
 
 monitorUntilStopped :: Socket z t -> (Maybe EventMsg -> ZMQ z a) -> ZMQ z (Async (Maybe EventMsg))
 monitorUntilStopped skt yield =
