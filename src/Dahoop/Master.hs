@@ -85,7 +85,7 @@ runAMaster :: forall j m z. (DahoopTask j, MonadIO m, MonadMask m)
            -> NonEmpty (Job (Id j) (Input j))
            -> L.FoldM m (Id j, Result j) z
            -> m z
-runAMaster _ k config preloadData work (L.FoldM step first extract) =
+runAMaster proxy k config preloadData work (L.FoldM step first extract) =
         runZMQT $ do jobCode <- liftIO M.generateJobCode
                      eventQueue <- initEvents
 
@@ -94,11 +94,11 @@ runAMaster _ k config preloadData work (L.FoldM step first extract) =
                      sock <- liftZMQ $ socket Pub
                      bindM sock $ TCP Wildcard (config^.announcePort)
                      announceThread <- liftZMQ $ async (announce sock (announcement config (DNS (config ^. masterAddress)) jobCode) eventQueue)
-                     (liftIO . link) =<< liftZMQ (async (preload (undefined :: j) (config ^. preloadPort) preloadData eventQueue))
+                     (liftIO . link) =<< liftZMQ (async (preload proxy (config ^. preloadPort) preloadData eventQueue))
 
                      -- the work
                      initial <- lift first
-                     result <- theProcess' (undefined :: j) k (config ^. askPort) jobCode (config ^. resultsPort) (config ^. loggingPort) work eventQueue (initial, step)
+                     result <- theProcess' proxy k (config ^. askPort) jobCode (config ^. resultsPort) (config ^. loggingPort) work eventQueue (initial, step)
 
                      -- shutdown
                      liftIO (cancel announceThread)
@@ -161,14 +161,14 @@ theProcess' :: forall t m x z. (MonadIO m, DahoopTask t)
             -> Events (Id t) (Log t)
             -> (x, x -> (Id t , Result t) -> m x)
             -> ZMQT z m x
-theProcess' _ k sendPort jc rport logPort work eventQueue foldbits = do
+theProcess' proxy k sendPort jc rport logPort work eventQueue foldbits = do
     workVar <- initOutgoing 1
     queue <- atomicallyIO $ buildWork work
     liftZMQ $
-        do asyncLink (dealWork (undefined :: t) sendPort jc workVar eventQueue queue)
-           asyncLink (receiveLogs (undefined :: t) logPort eventQueue)
+        do asyncLink (dealWork proxy sendPort jc workVar eventQueue queue)
+           asyncLink (receiveLogs proxy logPort eventQueue)
            asyncLink $ lift $ slurpEvents eventQueue k
-    waitForAllResults (undefined :: t) rport jc queue eventQueue workVar foldbits
+    waitForAllResults proxy rport jc queue eventQueue workVar foldbits
 
 dealWork :: (DahoopTask t,MonadIO m)
          => t
