@@ -5,6 +5,5 @@ packages:
   - '.'
 extra-deps:
 - unagi-chan-0.4.0.0
-- atomic-primops-0.8.0.2
 resolver:
-  lts-3.13
+  lts-4.0

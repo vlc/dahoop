@@ -38,7 +38,7 @@ main =
          let config = D.DistConfig "127.0.0.1" 4001 4000 4002 4003 (read port)
           in case makeWorkUnits (read numWorkUnits) of
              Nothing -> liftIO $ putStrLn "Must have at least one work unit" >> exitFailure
-             Just ws -> D.runAMaster ExampleJob masterHandler config preload (fmap (fmap liftIO) $ ws) resultFold
+             Just ws -> D.runAMaster ExampleJob masterHandler config preload (fmap (fmap liftIO) ws) resultFold
        ["slave", numSlaves, port] -> liftIO $ do
           as <- replicateM (read numSlaves) $ async $ D.runASlave ExampleJob slaveHandler workerThread (D.TCP (D.IP4' 127 0 0 1) (read port))
           mapM_ wait as
