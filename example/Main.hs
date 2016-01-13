@@ -35,12 +35,12 @@ main =
          secret = "BOO!"
      flip runReaderT secret $ case v of
        ["master", numWorkUnits, port] ->
-         let config = D.DistConfig "127.0.0.1" 4001 4000 4002 4003 (read port)
+         let config = D.DistConfig "192.168.113.248" 4001 4000 4002 4003 (read port)
           in case makeWorkUnits (read numWorkUnits) of
              Nothing -> liftIO $ putStrLn "Must have at least one work unit" >> exitFailure
              Just ws -> D.runAMaster ExampleJob masterHandler config preload (fmap (fmap liftIO) ws) resultFold
-       ["slave", numSlaves, port] -> liftIO $ do
-          as <- replicateM (read numSlaves) $ async $ D.runASlave ExampleJob slaveHandler workerThread (D.TCP (D.IP4' 127 0 0 1) (read port))
+       ["slave", numSlaves, host, port] -> liftIO $ do
+          as <- replicateM (read numSlaves) $ async $ D.runASlave ExampleJob slaveHandler workerThread (D.TCP (D.DNS host) (read port))
           mapM_ wait as
        _ -> liftIO $
          do putStrLn "USAGE: $0 [slave NUM_WORKERS MASTER_PORT | master NUM_WORK_UNITS PORT]"
