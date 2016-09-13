@@ -5,5 +5,4 @@ packages:
   - '.'
 extra-deps:
 - unagi-chan-0.4.0.0
-resolver:
-  lts-4.0
+resolver: nightly-2016-09-08

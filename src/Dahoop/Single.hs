@@ -1,5 +1,7 @@
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE TypeFamilies                #-}
+-- GHC 8.0.1 says the DahoopTask constraint isn't needed on runASingle
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 module Dahoop.Single where
 
 import qualified Control.Foldl as L

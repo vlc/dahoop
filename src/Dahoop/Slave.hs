@@ -6,6 +6,8 @@
 {-# LANGUAGE OverloadedStrings         #-}
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE ScopedTypeVariables       #-}
+-- GHC 8.0.1 says the DahoopTask constraint isn't needed on runASlave
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 module Dahoop.Slave where
 
 
@@ -16,7 +18,6 @@ import Control.Lens             ((^.))
 import Control.Monad            (forever)
 import Data.Time
 import Control.Monad.Trans
-import Control.Monad.Catch
 import Data.ByteString          (ByteString)
 import Data.Serialize           (runGet, encode, decode)
 import Network.HostName
@@ -84,7 +85,7 @@ waitForAnnouncement k queue =
                Right ann -> return ann
                Left _ -> loop
 
-waitForDone :: (MonadIO m, Functor m) => TChan ByteString -> JobCode -> m ()
+waitForDone :: (MonadIO m) => TChan ByteString -> JobCode -> m ()
 waitForDone queue ourJc =
   do let loop =
            do Right j <- runGet getAnnouncementOrFinishUp <$> readTChan queue
@@ -104,7 +105,7 @@ requestPreload slaveid k port =
        liftIO (k ReceivedPreload)
 
 workLoop :: forall m j t t1 t2 z.
-            (MonadIO m, MonadMask m,
+            (MonadIO m,
              DahoopTask j,
              Receiver t, Sender t1, Sender t, Sender t2)
             => j

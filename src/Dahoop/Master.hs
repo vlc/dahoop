@@ -55,27 +55,9 @@ data DistConfig = DistConfig
     , _announcePort :: Int
     }
 
-masterAddress :: Simple Lens DistConfig String
-masterAddress = lens _masterAddress (\v s -> v { _masterAddress = s})
-
-resultsPort :: Simple Lens DistConfig Int
-resultsPort = lens _resultsPort (\v s -> v { _resultsPort = s})
-
-askPort :: Simple Lens DistConfig Int
-askPort = lens _askPort (\v s -> v { _askPort = s})
-
-preloadPort :: Simple Lens DistConfig Int
-preloadPort = lens _preloadPort (\v s -> v { _preloadPort = s})
-
-loggingPort :: Simple Lens DistConfig Int
-loggingPort = lens _loggingPort (\v s -> v { _loggingPort = s})
-
-announcePort :: Simple Lens DistConfig Int
-announcePort = lens _announcePort (\v s -> v { _announcePort = s})
+makeLenses ''DistConfig
 
 type Job i b = (i, IO b)
-
-  -- (f x == f y) => (x == y)
 
 runAMaster :: forall j m z. (DahoopTask j, MonadIO m, MonadMask m)
            => j
@@ -225,14 +207,14 @@ receiveLogs _ logPort eventQueue =
           writeEvent eventQueue (RemoteEvent slaveid logEntry)
      return ()
 
-waitForAllResults :: (MonadIO m, DahoopTask t)
+waitForAllResults :: (MonadIO m,DahoopTask t)
                   => t
                   -> Int
                   -> M.JobCode
                   -> Work (Id t) (IO (Input t))
                   -> Events (Id t) (Log t)
                   -> Outgoing (Id t)
-                  -> (s,s -> (Id t, Result t) -> m s)
+                  -> (s,s -> (Id t,Result t) -> m s)
                   -> ZMQT z m s
 waitForAllResults _ rp jc queue eventQueue workVar (first, step) =
   do receiveSocket <- returning (socket Pull) (`bindM` TCP Wildcard rp)
@@ -304,9 +286,7 @@ sendToReq :: (MonadIO m, Sender t) => Socket z t -> ByteString -> ByteString -> 
 sendToReq skt peer msg =
   sendMulti skt
             (peer :|
-             ["", msg])
-
----
+             ["",msg])
 
 type Elem i = Maybe (i, ByteString)
 data Outgoing i = Outgoing (BC.InChan (Elem i)) (BC.OutChan (Elem i))
@@ -324,7 +304,6 @@ writeOutgoing (Outgoing ins _) wid item = liftIO $ BC.writeChan ins $ Just (wid,
 initOutgoing :: MonadIO m => Int -> m (Outgoing i)
 initOutgoing n = liftIO $ uncurry Outgoing <$> BC.newChan n
 
-
 data Events i l = Events (UC.InChan (MasterEvent i l)) (UC.OutChan (MasterEvent i l))
 
 -- writeEvent (Events ins _) k = writeChan ins k
@@ -341,51 +320,3 @@ slurpEvents (Events _ outs) f = forever $ do
   _ <- f v
   return ()
 
--- type Outgoing i = TBMQueue (i, ByteString)
-
--- nextOutgoing :: MonadIO m => Outgoing i -> m (Maybe (i, ByteString))
--- nextOutgoing q = atomicallyIO $ readTBMQueue q
-
--- closeOutgoing :: MonadIO m => Outgoing i -> m ()
--- closeOutgoing q = atomicallyIO $
---   do closeTBMQueue q
---      drainQueue q
-
--- writeOutgoing :: MonadIO m => Outgoing t -> t -> ByteString -> m ()
--- writeOutgoing q wid item = atomicallyIO $ writeTBMQueue q (wid, item) -- should workItem be an async around action here?
-
--- initOutgoing n = atomicallyIO (newTBMQueue n)
-
--- type Events i l = TQueue (MasterEvent i l)
-
--- initEvents :: MonadIO m => m (Events i l)
--- initEvents = atomicallyIO newTQueue
-
--- writeEvent :: MonadIO m => Events i l -> MasterEvent i l -> m ()
--- writeEvent q k = atomicallyIO $ writeTQueue q k
-
--- slurpEvents :: Events i l -> (MasterEvent i l -> IO a) -> IO ()
--- slurpEvents q f =
---   do forever $ slurpTQueue q f >> threadDelay 200000
-
-
--- slurpTQueue :: MonadIO m => TQueue a -> (a -> m x) -> m ()
--- slurpTQueue q f = do
---   events <- atomicallyIO $ readAllFromQueue q
---   mapM_ f events
-
--- readAllFromQueue :: TQueue a -> STM [a]
--- readAllFromQueue q = go []
---   where go xs = do
---           a <- tryReadTQueue q
---           case a of
---             Just v -> go (v:xs)
---             Nothing -> return xs
-
--- drainQueue :: TBMQueue a -> STM ()
--- drainQueue q = go
---   where go = do
---           x <- readTBMQueue q
---           case x of
---             Nothing -> return ()
---             Just _ -> go
