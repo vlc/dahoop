@@ -7,7 +7,7 @@
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE ScopedTypeVariables       #-}
 -- GHC 8.0.1 says the DahoopTask constraint isn't needed on runASlave
-{-# OPTIONS_GHC -Wno-redundant-constraints #-}
+-- {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 module Dahoop.Slave where
 
 
