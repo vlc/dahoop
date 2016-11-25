@@ -86,7 +86,7 @@ askAddress = lens _askAddress (\v s -> v { _askAddress = s})
 
 preloadAddress :: Simple Lens Announcement (Address Connect)
 preloadAddress = lens _preloadAddress (\v s -> v { _preloadAddress = s})
-                 
+
 loggingAddress :: Simple Lens Announcement (Address Connect)
 loggingAddress = lens _loggingAddress (\v s -> v { _loggingAddress = s})
 

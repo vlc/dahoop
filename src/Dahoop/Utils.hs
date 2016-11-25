@@ -16,7 +16,13 @@ returning f z =
 atomicallyIO :: MonadIO m => STM a -> m a
 atomicallyIO = liftIO . atomically
 
-class (Ord (Id j), Serialize (Input j), Serialize (Result j), Serialize (Log j), Serialize (Id j), Serialize (Preload j)) => DahoopTask j where
+class (Ord (Id j)
+      ,Serialize (Input j)
+      ,Serialize (Result j)
+      ,Serialize (Log j)
+      ,Serialize (Id j)
+      ,Serialize (Preload j)) =>
+      DahoopTask j  where
   type Preload j
   type Input j
   type Result j

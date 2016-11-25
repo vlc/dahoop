@@ -5,7 +5,6 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell     #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 {-# OPTIONS_GHC -Werror #-}
 module Dahoop.Master (
@@ -55,8 +54,6 @@ data DistConfig = DistConfig
     , _announcePort :: Int
     }
 
-makeLenses ''DistConfig
-
 type Job i b = (i, IO b)
 
 runAMaster :: forall j m z. (DahoopTask j, MonadIO m, MonadMask m)
@@ -74,13 +71,13 @@ runAMaster proxy k config preloadData work (L.FoldM step first extract) =
                      -- setup
                      liftIO $ k (Began jobCode)
                      sock <- liftZMQ $ socket Pub
-                     bindM sock $ TCP Wildcard (config^.announcePort)
-                     announceThread <- liftZMQ $ async (announce sock (announcement config (DNS (config ^. masterAddress)) jobCode) eventQueue)
-                     (liftIO . link) =<< liftZMQ (async (preload proxy (config ^. preloadPort) preloadData eventQueue))
+                     bindM sock $ TCP Wildcard (config&_announcePort)
+                     announceThread <- liftZMQ $ async (announce sock (announcement config (DNS (_masterAddress config)) jobCode) eventQueue)
+                     (liftIO . link) =<< liftZMQ (async (preload proxy (config & _preloadPort) preloadData eventQueue))
 
                      -- the work
                      initial <- lift first
-                     result <- theProcess' proxy k (config ^. askPort) jobCode (config ^. resultsPort) (config ^. loggingPort) work eventQueue (initial, step)
+                     result <- theProcess' proxy k (config & _askPort) jobCode (config & _resultsPort) (config & _loggingPort) work eventQueue (initial, step)
 
                      -- shutdown
                      liftIO (cancel announceThread)
@@ -97,10 +94,10 @@ announcement :: DistConfig
 announcement v ourHostname jc =
   M.Announcement
       jc
-      (tcpHere (v ^. resultsPort))
-      (tcpHere (v ^. askPort))
-      (tcpHere (v ^. preloadPort))
-      (tcpHere (v ^. loggingPort))
+      (tcpHere (v & _resultsPort))
+      (tcpHere (v & _askPort))
+      (tcpHere (v & _preloadPort))
+      (tcpHere (v & _loggingPort))
   where tcpHere = TCP ourHostname
 
 announce :: (MonadIO m) => Socket s Pub -> M.Announcement -> Events i l -> ZMQT s m ()
